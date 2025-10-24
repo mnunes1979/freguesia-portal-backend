@@ -1439,36 +1439,25 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================
-// 14. LIGAÇÃO À BASE DE DADOS E SERVIDOR
+// 14. LIGAÇÃO À BASE DE DADOS E SERVIDOR (FINAL, SEM HOTFIX)
 // ============================================
 
 function clean(value) {
   if (!value) return value;
-  // remove aspas exteriores, espaços e resíduos tipo trailing $
   return String(value).replace(/^['"]|['"]$/g, '').trim().replace(/\s+$/,'').replace(/\$$/, '');
 }
 
-// 1) lê e limpa a env
-let RAW_MONGO_URI = process.env.MONGODB_URI;
-RAW_MONGO_URI = clean(RAW_MONGO_URI);
-
-// 2) HOTFIX DE EMERGÊNCIA (⚠️ contém segredo):
-//    Se a env falhar no Easypanel, usamos temporariamente o URI correto.
-//    >>> Remove este bloco assim que a env estiver a ser injetada! <<<
+// 1) validação dura da env
+const RAW_MONGO_URI = clean(process.env.MONGODB_URI);
 if (!RAW_MONGO_URI) {
-  RAW_MONGO_URI = clean('mongodb://mongo:6252d62dc53224027c68@portal_freguesias_mongodb-freguesia:27017/freguesia?authSource=admin&tls=false');
-  console.warn('⚠️  MONGODB_URI não veio do ambiente. A usar HOTFIX embutido TEMPORÁRIO.');
-}
-
-// 3) logs de diagnóstico (password mascarada)
-const MASKED_URI = RAW_MONGO_URI ? RAW_MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//<user>:<pass>@') : '(missing)';
-console.log('ENV CHECK → NODE_ENV=', process.env.NODE_ENV || '(unset)');
-console.log('ENV CHECK → MONGODB_URI (masked)=', MASKED_URI);
-
-if (!RAW_MONGO_URI) {
-  console.error('❌ ERRO: MONGODB_URI continua indefinida mesmo após HOTFIX.');
+  console.error('❌ ERRO: Variável MONGODB_URI não definida no ambiente!');
   process.exit(1);
 }
+
+// 2) log mascarado (sem password)
+const MASKED_URI = RAW_MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//<user>:<pass>@');
+console.log('ENV CHECK → NODE_ENV=', process.env.NODE_ENV || '(unset)');
+console.log('ENV CHECK → MONGODB_URI (masked)=', MASKED_URI);
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
 const MONGODB_URI = RAW_MONGO_URI;
@@ -1477,9 +1466,7 @@ mongoose.set('strictQuery', false);
 
 mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
   .then(() => {
-    // Log estruturado em JSON (winston)
     logger.info({ msg: 'MongoDB conectado com sucesso', uri: MASKED_URI });
-
     app.listen(PORT, () => {
       logger.info({ msg: 'Servidor iniciado', mode: process.env.NODE_ENV || 'development', port: PORT });
       console.log(`🚀 Servidor iniciado: http://localhost:${PORT}`);
