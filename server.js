@@ -1442,31 +1442,54 @@ app.use((err, req, res, next) => {
 // 14. LIGAÇÃO À BASE DE DADOS E SERVIDOR
 // ============================================
 
-// ❗ Falha imediata se a variável não existir (sem fallback para localhost)
-if (!process.env.MONGODB_URI) {
-  console.error('❌ ERRO: Variável MONGODB_URI não definida no ambiente!');
+function clean(value) {
+  if (!value) return value;
+  // remove aspas exteriores, espaços e resíduos tipo trailing $
+  return String(value).replace(/^['"]|['"]$/g, '').trim().replace(/\s+$/,'').replace(/\$$/, '');
+}
+
+// 1) lê e limpa a env
+let RAW_MONGO_URI = process.env.MONGODB_URI;
+RAW_MONGO_URI = clean(RAW_MONGO_URI);
+
+// 2) HOTFIX DE EMERGÊNCIA (⚠️ contém segredo):
+//    Se a env falhar no Easypanel, usamos temporariamente o URI correto.
+//    >>> Remove este bloco assim que a env estiver a ser injetada! <<<
+if (!RAW_MONGO_URI) {
+  RAW_MONGO_URI = clean('mongodb://mongo:6252d62dc53224027c68@portal_freguesias_mongodb-freguesia:27017/freguesia?authSource=admin&tls=false');
+  console.warn('⚠️  MONGODB_URI não veio do ambiente. A usar HOTFIX embutido TEMPORÁRIO.');
+}
+
+// 3) logs de diagnóstico (password mascarada)
+const MASKED_URI = RAW_MONGO_URI ? RAW_MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//<user>:<pass>@') : '(missing)';
+console.log('ENV CHECK → NODE_ENV=', process.env.NODE_ENV || '(unset)');
+console.log('ENV CHECK → MONGODB_URI (masked)=', MASKED_URI);
+
+if (!RAW_MONGO_URI) {
+  console.error('❌ ERRO: MONGODB_URI continua indefinida mesmo após HOTFIX.');
   process.exit(1);
 }
 
-const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI;
+const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
+const MONGODB_URI = RAW_MONGO_URI;
 
 mongoose.set('strictQuery', false);
 
 mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
-.then(() => {
-  logger.info({ msg: 'MongoDB conectado com sucesso', uri: MONGODB_URI });
-  
-  app.listen(PORT, () => {
-    logger.info({ msg: 'Servidor iniciado', mode: process.env.NODE_ENV || 'development', port: PORT });
-    console.log(`🚀 Servidor iniciado: http://localhost:${PORT}`);
-    console.log(`📚 API disponível em: http://localhost:${PORT}/api`);
+  .then(() => {
+    // Log estruturado em JSON (winston)
+    logger.info({ msg: 'MongoDB conectado com sucesso', uri: MASKED_URI });
+
+    app.listen(PORT, () => {
+      logger.info({ msg: 'Servidor iniciado', mode: process.env.NODE_ENV || 'development', port: PORT });
+      console.log(`🚀 Servidor iniciado: http://localhost:${PORT}`);
+      console.log(`📚 API disponível em: http://localhost:${PORT}/api`);
+    });
+  })
+  .catch((error) => {
+    logger.error({ msg: 'Erro ao conectar ao MongoDB', error });
+    process.exit(1);
   });
-})
-.catch((error) => {
-  logger.error({ msg: 'Erro ao conectar ao MongoDB', error });
-  process.exit(1);
-});
 
 process.on('unhandledRejection', (err) => {
   logger.error({ msg: 'UNHANDLED REJECTION! Shutting down...', error: err });
