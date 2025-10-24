@@ -34,11 +34,7 @@ app.use(
         imgSrc: ["'self'", 'data:', 'https:'],
       },
     },
-    hsts: {
-      maxAge: 31536000,
-      includeSubDomains: true,
-      preload: true,
-    },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
   })
 );
 
@@ -93,20 +89,11 @@ app.use('/api/auth/register', authLimiter);
 
 const logger = winston.createLogger({
   level: 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.json()
-  ),
-  transports: [
-    new winston.transports.Console({
-      format: winston.format.simple(),
-    }),
-  ],
+  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
+  transports: [new winston.transports.Console({ format: winston.format.simple() })],
 });
 
-if (process.env.NODE_ENV !== 'production') {
-  app.use(morgan('dev'));
-}
+if (process.env.NODE_ENV !== 'production') app.use(morgan('dev'));
 
 // ============================================
 // 4. MODELOS DE DADOS
@@ -114,12 +101,7 @@ if (process.env.NODE_ENV !== 'production') {
 
 const userSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: [true, 'Nome é obrigatório'],
-      trim: true,
-      maxlength: [100, 'Nome muito longo'],
-    },
+    name: { type: String, required: [true, 'Nome é obrigatório'], trim: true, maxlength: [100, 'Nome muito longo'] },
     email: {
       type: String,
       required: [true, 'Email é obrigatório'],
@@ -128,49 +110,26 @@ const userSchema = new mongoose.Schema(
       trim: true,
       match: [/^\S+@\S+\.\S+$/, 'Email inválido'],
     },
-    phone: {
-      type: String,
-      trim: true,
-      match: [/^\+?[0-9\s-()]+$/, 'Telefone inválido'],
-    },
+    phone: { type: String, trim: true, match: [/^\+?[0-9\s-()]+$/, 'Telefone inválido'] },
     password: {
       type: String,
       required: [true, 'Password é obrigatória'],
       minlength: [8, 'Password deve ter no mínimo 8 caracteres'],
       select: false,
     },
-    role: {
-      type: String,
-      enum: ['user', 'moderator', 'admin'],
-      default: 'user',
-    },
-    isVerified: {
-      type: Boolean,
-      default: false,
-    },
+    role: { type: String, enum: ['user', 'moderator', 'admin'], default: 'user' },
+    isVerified: { type: Boolean, default: false },
     verificationToken: String,
     verificationTokenExpires: Date,
     passwordResetToken: String,
     passwordResetExpires: Date,
-    loginAttempts: {
-      type: Number,
-      default: 0,
-    },
+    loginAttempts: { type: Number, default: 0 },
     lockUntil: Date,
-    createdAt: {
-      type: Date,
-      default: Date.now,
-    },
+    createdAt: { type: Date, default: Date.now },
     lastLogin: Date,
-    consentGiven: {
-      type: Boolean,
-      required: true,
-      default: false,
-    },
+    consentGiven: { type: Boolean, required: true, default: false },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 userSchema.pre('save', async function (next) {
@@ -191,24 +150,9 @@ const User = mongoose.model('User', userSchema);
 
 const incidentSchema = new mongoose.Schema(
   {
-    title: {
-      type: String,
-      required: [true, 'Título é obrigatório'],
-      trim: true,
-      maxlength: [200, 'Título muito longo'],
-    },
-    description: {
-      type: String,
-      required: [true, 'Descrição é obrigatória'],
-      trim: true,
-      maxlength: [2000, 'Descrição muito longa'],
-    },
-    location: {
-      type: String,
-      required: [true, 'Localização é obrigatória'],
-      trim: true,
-      maxlength: [300, 'Localização muito longa'],
-    },
+    title: { type: String, required: [true, 'Título é obrigatório'], trim: true, maxlength: [200, 'Título muito longo'] },
+    description: { type: String, required: [true, 'Descrição é obrigatória'], trim: true, maxlength: [2000, 'Descrição muito longa'] },
+    location: { type: String, required: [true, 'Localização é obrigatória'], trim: true, maxlength: [300, 'Localização muito longa'] },
     gps: {
       type: String,
       trim: true,
@@ -217,146 +161,58 @@ const incidentSchema = new mongoose.Schema(
         'Coordenadas GPS inválidas',
       ],
     },
-    status: {
-      type: String,
-      enum: ['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'],
-      default: 'pending',
-    },
-    photos: [
-      {
-        type: String,
-        maxlength: [500, 'URL da foto muito longo'],
-      },
-    ],
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    moderatorNotes: {
-      type: String,
-      maxlength: [1000, 'Notas muito longas'],
-    },
+    status: { type: String, enum: ['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'], default: 'pending' },
+    photos: [{ type: String, maxlength: [500, 'URL da foto muito longo'] }],
+    user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    moderatorNotes: { type: String, maxlength: [1000, 'Notas muito longas'] },
     resolvedDate: Date,
-    createdAt: {
-      type: Date,
-      default: Date.now,
-    },
+    createdAt: { type: Date, default: Date.now },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 incidentSchema.index({ status: 1, createdAt: -1 });
 incidentSchema.index({ user: 1 });
-
 const Incident = mongoose.model('Incident', incidentSchema);
 
 const newsSchema = new mongoose.Schema(
   {
-    title: {
-      type: String,
-      required: [true, 'Título é obrigatório'],
-      trim: true,
-      maxlength: [200, 'Título muito longo'],
-    },
-    excerpt: {
-      type: String,
-      required: [true, 'Resumo é obrigatório'],
-      trim: true,
-      maxlength: [500, 'Resumo muito longo'],
-    },
-    content: {
-      type: String,
-      required: [true, 'Conteúdo é obrigatório'],
-      maxlength: [10000, 'Conteúdo muito longo'],
-    },
-    image: {
-      type: String,
-      required: [true, 'Imagem é obrigatória'],
-    },
-    author: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-    },
-    published: {
-      type: Boolean,
-      default: false,
-    },
+    title: { type: String, required: [true, 'Título é obrigatório'], trim: true, maxlength: [200, 'Título muito longo'] },
+    excerpt: { type: String, required: [true, 'Resumo é obrigatório'], trim: true, maxlength: [500, 'Resumo muito longo'] },
+    content: { type: String, required: [true, 'Conteúdo é obrigatório'], maxlength: [10000, 'Conteúdo muito longo'] },
+    image: { type: String, required: [true, 'Imagem é obrigatória'] },
+    author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    published: { type: Boolean, default: false },
     publishDate: Date,
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
-
 const News = mongoose.model('News', newsSchema);
 
 const slideSchema = new mongoose.Schema(
   {
-    title: {
-      type: String,
-      required: [true, 'Título é obrigatório'],
-      trim: true,
-      maxlength: [100, 'Título muito longo'],
-    },
-    image: {
-      type: String,
-      required: [true, 'Imagem é obrigatória'],
-    },
-    order: {
-      type: Number,
-      default: 0,
-    },
-    active: {
-      type: Boolean,
-      default: true,
-    },
+    title: { type: String, required: [true, 'Título é obrigatório'], trim: true, maxlength: [100, 'Título muito longo'] },
+    image: { type: String, required: [true, 'Imagem é obrigatória'] },
+    order: { type: Number, default: 0 },
+    active: { type: Boolean, default: true },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
-
 const Slide = mongoose.model('Slide', slideSchema);
 
 const linkSchema = new mongoose.Schema(
   {
-    title: {
-      type: String,
-      required: [true, 'Título é obrigatório'],
-      trim: true,
-      maxlength: [100, 'Título muito longo'],
-    },
-    url: {
-      type: String,
-      required: [true, 'URL é obrigatória'],
-      trim: true,
-      match: [/^https?:\/\/.+/, 'URL inválida'],
-    },
-    order: {
-      type: Number,
-      default: 0,
-    },
-    active: {
-      type: Boolean,
-      default: true,
-    },
+    title: { type: String, required: [true, 'Título é obrigatório'], trim: true, maxlength: [100, 'Título muito longo'] },
+    url: { type: String, required: [true, 'URL é obrigatória'], trim: true, match: [/^https?:\/\/.+/, 'URL inválida'] },
+    order: { type: Number, default: 0 },
+    active: { type: Boolean, default: true },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
-
 const Link = mongoose.model('Link', linkSchema);
 
 const auditSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-  },
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   action: {
     type: String,
     required: true,
@@ -375,97 +231,54 @@ const auditSchema = new mongoose.Schema({
       'news_delete',
     ],
   },
-  resource: {
-    type: String,
-    required: true,
-  },
+  resource: { type: String, required: true },
   resourceId: mongoose.Schema.Types.ObjectId,
   ipAddress: String,
   userAgent: String,
   details: mongoose.Schema.Types.Mixed,
-  timestamp: {
-    type: Date,
-    default: Date.now,
-  },
+  timestamp: { type: Date, default: Date.now },
 });
-
 auditSchema.index({ user: 1, timestamp: -1 });
 auditSchema.index({ action: 1, timestamp: -1 });
-
 const AuditLog = mongoose.model('AuditLog', auditSchema);
 
 // ============================================
-// 5. MIDDLEWARES DE AUTENTICAÇÃO
+// 5. AUTENTICAÇÃO / AUTORIZAÇÃO
 // ============================================
 
-const generateToken = (userId) => {
-  return jwt.sign(
+const generateToken = (userId) =>
+  jwt.sign(
     { id: userId },
     process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
     { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
   );
-};
 
 const authenticate = async (req, res, next) => {
   try {
     let token;
-
-    if (
-      req.headers.authorization &&
-      req.headers.authorization.startsWith('Bearer')
-    ) {
+    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
       token = req.headers.authorization.split(' ')[1];
     }
+    if (!token) return res.status(401).json({ success: false, message: 'Não autenticado. Token em falta.' });
 
-    if (!token) {
-      return res.status(401).json({
-        success: false,
-        message: 'Não autenticado. Token em falta.',
-      });
-    }
-
-    const decoded = jwt.verify(
-      token,
-      process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production'
-    );
-
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production');
     const user = await User.findById(decoded.id).select('-password');
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Utilizador não encontrado.',
-      });
-    }
-
-    if (!user.isVerified) {
-      return res.status(403).json({
-        success: false,
-        message: 'Email não verificado. Verifique o seu email.',
-      });
-    }
+    if (!user) return res.status(401).json({ success: false, message: 'Utilizador não encontrado.' });
+    if (!user.isVerified)
+      return res.status(403).json({ success: false, message: 'Email não verificado. Verifique o seu email.' });
 
     req.user = user;
     next();
   } catch (error) {
     logger.error('Authentication error:', error);
-    return res.status(401).json({
-      success: false,
-      message: 'Token inválido ou expirado.',
-    });
+    return res.status(401).json({ success: false, message: 'Token inválido ou expirado.' });
   }
 };
 
-const authorize = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Não tem permissão para aceder a este recurso.',
-      });
-    }
-    next();
-  };
+const authorize = (...roles) => (req, res, next) => {
+  if (!roles.includes(req.user.role))
+    return res.status(403).json({ success: false, message: 'Não tem permissão para aceder a este recurso.' });
+  next();
 };
 
 // Middleware de auditoria
@@ -494,38 +307,11 @@ const auditLog = (action, resource) => {
 // ============================================
 
 const validateRegistration = [
-  body('name')
-    .trim()
-    .notEmpty()
-    .withMessage('Nome é obrigatório')
-    .isLength({ min: 2, max: 100 })
-    .withMessage('Nome deve ter entre 2 e 100 caracteres')
-    .matches(/^[a-zA-ZÀ-ÿ\s]+$/)
-    .withMessage('Nome deve conter apenas letras'),
-  body('email')
-    .trim()
-    .normalizeEmail()
-    .isEmail()
-    .withMessage('Email inválido')
-    .isLength({ max: 100 })
-    .withMessage('Email muito longo'),
-  body('phone')
-    .optional()
-    .trim()
-    .matches(/^\+?[0-9\s-()]+$/)
-    .withMessage('Telefone inválido'),
-  body('password')
-    .isLength({ min: 8 })
-    .withMessage('Password deve ter no mínimo 8 caracteres')
-    .matches(
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/
-    )
-    .withMessage(
-      'Password deve conter maiúsculas, minúsculas, números e símbolos'
-    ),
-  body('consentGiven')
-    .isBoolean()
-    .withMessage('Deve aceitar os termos e condições'),
+  body('name').trim().notEmpty().withMessage('Nome é obrigatório').isLength({ min: 2, max: 100 }).withMessage('Nome deve ter entre 2 e 100 caracteres').matches(/^[a-zA-ZÀ-ÿ\s]+$/).withMessage('Nome deve conter apenas letras'),
+  body('email').trim().normalizeEmail().isEmail().withMessage('Email inválido').isLength({ max: 100 }).withMessage('Email muito longo'),
+  body('phone').optional().trim().matches(/^\+?[0-9\s-()]+$/).withMessage('Telefone inválido'),
+  body('password').isLength({ min: 8 }).withMessage('Password deve ter no mínimo 8 caracteres').matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/).withMessage('Password deve conter maiúsculas, minúsculas, números e símbolos'),
+  body('consentGiven').isBoolean().withMessage('Deve aceitar os termos e condições'),
 ];
 
 const validateLogin = [
@@ -534,31 +320,10 @@ const validateLogin = [
 ];
 
 const validateIncident = [
-  body('title')
-    .trim()
-    .notEmpty()
-    .withMessage('Título é obrigatório')
-    .isLength({ min: 5, max: 200 })
-    .withMessage('Título deve ter entre 5 e 200 caracteres'),
-  body('description')
-    .trim()
-    .notEmpty()
-    .withMessage('Descrição é obrigatória')
-    .isLength({ min: 10, max: 2000 })
-    .withMessage('Descrição deve ter entre 10 e 2000 caracteres'),
-  body('location')
-    .trim()
-    .notEmpty()
-    .withMessage('Localização é obrigatória')
-    .isLength({ max: 300 })
-    .withMessage('Localização muito longa'),
-  body('gps')
-    .optional()
-    .trim()
-    .matches(
-      /^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/
-    )
-    .withMessage('Coordenadas GPS inválidas'),
+  body('title').trim().notEmpty().withMessage('Título é obrigatório').isLength({ min: 5, max: 200 }).withMessage('Título deve ter entre 5 e 200 caracteres'),
+  body('description').trim().notEmpty().withMessage('Descrição é obrigatória').isLength({ min: 10, max: 2000 }).withMessage('Descrição deve ter entre 10 e 2000 caracteres'),
+  body('location').trim().notEmpty().withMessage('Localização é obrigatória').isLength({ max: 300 }).withMessage('Localização muito longa'),
+  body('gps').optional().trim().matches(/^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/).withMessage('Coordenadas GPS inválidas'),
 ];
 
 // ============================================
@@ -568,35 +333,16 @@ const validateIncident = [
 app.post('/api/auth/register', validateRegistration, async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array(),
-      });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
 
     const { name, email, phone, password, consentGiven } = req.body;
-
     const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email já registado.',
-      });
-    }
+    if (existingUser) return res.status(400).json({ success: false, message: 'Email já registado.' });
 
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
 
-    const user = await User.create({
-      name,
-      email,
-      phone,
-      password,
-      consentGiven,
-      verificationToken,
-      verificationTokenExpires,
-    });
+    const user = await User.create({ name, email, phone, password, consentGiven, verificationToken, verificationTokenExpires });
 
     logger.info(`New user registered: ${email}`);
 
@@ -611,67 +357,33 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message:
-        'Conta criada com sucesso! Verifique o seu email para ativar a conta.',
-      data: {
-        userId: user._id,
-        email: user.email,
-      },
+      message: 'Conta criada com sucesso! Verifique o seu email para ativar a conta.',
+      data: { userId: user._id, email: user.email },
     });
   } catch (error) {
     logger.error('Registration error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao criar conta. Tente novamente.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao criar conta. Tente novamente.' });
   }
 });
 
 app.post('/api/auth/login', validateLogin, async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array(),
-      });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
 
     const { email, password } = req.body;
-
     const user = await User.findOne({ email }).select('+password');
+    if (!user) return res.status(401).json({ success: false, message: 'Credenciais inválidas.' });
 
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas.',
-      });
-    }
-
-    if (user.isLocked()) {
-      return res.status(423).json({
-        success: false,
-        message:
-          'Conta temporariamente bloqueada devido a múltiplas tentativas falhadas.',
-      });
-    }
+    if (user.isLocked())
+      return res.status(423).json({ success: false, message: 'Conta temporariamente bloqueada devido a múltiplas tentativas falhadas.' });
 
     const isMatch = await user.comparePassword(password);
-
     if (!isMatch) {
       user.loginAttempts += 1;
-
-      if (user.loginAttempts >= 5) {
-        user.lockUntil = Date.now() + 30 * 60 * 1000;
-        logger.warn(`Account locked due to failed attempts: ${email}`);
-      }
-
+      if (user.loginAttempts >= 5) user.lockUntil = Date.now() + 30 * 60 * 1000;
       await user.save();
-
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas.',
-      });
+      return res.status(401).json({ success: false, message: 'Credenciais inválidas.' });
     }
 
     user.loginAttempts = 0;
@@ -697,21 +409,12 @@ app.post('/api/auth/login', validateLogin, async (req, res) => {
       message: 'Login efetuado com sucesso!',
       data: {
         token,
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isVerified: user.isVerified,
-        },
+        user: { id: user._id, name: user.name, email: user.email, role: user.role, isVerified: user.isVerified },
       },
     });
   } catch (error) {
     logger.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao efetuar login. Tente novamente.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao efetuar login. Tente novamente.' });
   }
 });
 
@@ -721,13 +424,7 @@ app.get('/api/auth/verify/:token', async (req, res) => {
       verificationToken: req.params.token,
       verificationTokenExpires: { $gt: Date.now() },
     });
-
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: 'Token inválido ou expirado.',
-      });
-    }
+    if (!user) return res.status(400).json({ success: false, message: 'Token inválido ou expirado.' });
 
     user.isVerified = true;
     user.verificationToken = undefined;
@@ -735,27 +432,15 @@ app.get('/api/auth/verify/:token', async (req, res) => {
     await user.save();
 
     logger.info(`Email verified: ${user.email}`);
-
-    res.json({
-      success: true,
-      message: 'Email verificado com sucesso! Pode agora fazer login.',
-    });
+    res.json({ success: true, message: 'Email verificado com sucesso! Pode agora fazer login.' });
   } catch (error) {
     logger.error('Email verification error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao verificar email.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao verificar email.' });
   }
 });
 
 app.get('/api/auth/me', authenticate, async (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      user: req.user,
-    },
-  });
+  res.json({ success: true, data: { user: req.user } });
 });
 
 // ============================================
@@ -771,12 +456,7 @@ app.post(
   async (req, res) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array(),
-        });
-      }
+      if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array() });
 
       const { title, description, location, gps, photos } = req.body;
 
@@ -790,21 +470,12 @@ app.post(
         status: 'pending',
       });
 
-      logger.info(
-        `Incident created by user ${req.user.email}: ${incident._id}`
-      );
+      logger.info(`Incident created by user ${req.user.email}: ${incident._id}`);
 
-      res.status(201).json({
-        success: true,
-        message: 'Incidência reportada com sucesso!',
-        data: { incident },
-      });
+      res.status(201).json({ success: true, message: 'Incidência reportada com sucesso!', data: { incident } });
     } catch (error) {
       logger.error('Create incident error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao reportar incidência.',
-      });
+      res.status(500).json({ success: false, message: 'Erro ao reportar incidência.' });
     }
   }
 );
@@ -812,79 +483,37 @@ app.post(
 app.get('/api/incidents/public', async (req, res) => {
   try {
     const { status } = req.query;
-
     const query = {};
-    if (
-      status &&
-      ['pending', 'analyzing', 'inProgress', 'resolved'].includes(status)
-    ) {
-      query.status = status;
-    } else if (!status) {
-      query.status = { $in: ['pending', 'analyzing', 'inProgress', 'resolved'] };
-    }
+    if (status && ['pending', 'analyzing', 'inProgress', 'resolved'].includes(status)) query.status = status;
+    else if (!status) query.status = { $in: ['pending', 'analyzing', 'inProgress', 'resolved'] };
 
-    const incidents = await Incident.find(query)
-      .select('-user -moderatorNotes -__v')
-      .sort('-createdAt')
-      .limit(100);
+    const incidents = await Incident.find(query).select('-user -moderatorNotes -__v').sort('-createdAt').limit(100);
 
-    res.json({
-      success: true,
-      count: incidents.length,
-      data: { incidents },
-    });
+    res.json({ success: true, count: incidents.length, data: { incidents } });
   } catch (error) {
     logger.error('List incidents error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar incidências.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao carregar incidências.' });
   }
 });
 
 app.get('/api/incidents/my', authenticate, async (req, res) => {
   try {
-    const incidents = await Incident.find({ user: req.user._id }).sort(
-      '-createdAt'
-    );
-
-    res.json({
-      success: true,
-      count: incidents.length,
-      data: { incidents },
-    });
+    const incidents = await Incident.find({ user: req.user._id }).sort('-createdAt');
+    res.json({ success: true, count: incidents.length, data: { incidents } });
   } catch (error) {
     logger.error('List my incidents error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar incidências.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao carregar incidências.' });
   }
 });
 
 app.get('/api/incidents/:id', async (req, res) => {
   try {
-    const incident = await Incident.findById(req.params.id).select(
-      '-user -moderatorNotes -__v'
-    );
-
-    if (!incident) {
-      return res.status(404).json({
-        success: false,
-        message: 'Incidência não encontrada.',
-      });
-    }
-
-    res.json({
-      success: true,
-      data: { incident },
-    });
+    const incident = await Incident.findById(req.params.id).select('-user -moderatorNotes -__v');
+    if (!incident) return res.status(404).json({ success: false, message: 'Incidência não encontrada.' });
+    res.json({ success: true, data: { incident } });
   } catch (error) {
     logger.error('Get incident error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar incidência.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao carregar incidência.' });
   }
 });
 
@@ -896,51 +525,23 @@ app.patch(
   async (req, res) => {
     try {
       const { status, moderatorNotes } = req.body;
+      if (!['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'].includes(status))
+        return res.status(400).json({ success: false, message: 'Estado inválido.' });
 
-      if (
-        !['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'].includes(
-          status
-        )
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: 'Estado inválido.',
-        });
-      }
-
-      const incident = await Incident.findById(req.params.id).populate(
-        'user',
-        'email name'
-      );
-
-      if (!incident) {
-        return res.status(404).json({
-          success: false,
-          message: 'Incidência não encontrada.',
-        });
-      }
+      const incident = await Incident.findById(req.params.id).populate('user', 'email name');
+      if (!incident) return res.status(404).json({ success: false, message: 'Incidência não encontrada.' });
 
       incident.status = status;
       if (moderatorNotes) incident.moderatorNotes = moderatorNotes;
       if (status === 'resolved') incident.resolvedDate = Date.now();
-
       await incident.save();
 
-      logger.info(
-        `Incident ${incident._id} status updated to ${status} by ${req.user.email}`
-      );
+      logger.info(`Incident ${incident._id} status updated to ${status} by ${req.user.email}`);
 
-      res.json({
-        success: true,
-        message: 'Estado atualizado com sucesso!',
-        data: { incident },
-      });
+      res.json({ success: true, message: 'Estado atualizado com sucesso!', data: { incident } });
     } catch (error) {
       logger.error('Update incident error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao atualizar incidência.',
-      });
+      res.status(500).json({ success: false, message: 'Erro ao atualizar incidência.' });
     }
   }
 );
@@ -953,26 +554,13 @@ app.delete(
   async (req, res) => {
     try {
       const incident = await Incident.findByIdAndDelete(req.params.id);
-
-      if (!incident) {
-        return res.status(404).json({
-          success: false,
-          message: 'Incidência não encontrada.',
-        });
-      }
+      if (!incident) return res.status(404).json({ success: false, message: 'Incidência não encontrada.' });
 
       logger.info(`Incident ${incident._id} deleted by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Incidência eliminada com sucesso!',
-      });
+      res.json({ success: true, message: 'Incidência eliminada com sucesso!' });
     } catch (error) {
       logger.error('Delete incident error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao eliminar incidência.',
-      });
+      res.status(500).json({ success: false, message: 'Erro ao eliminar incidência.' });
     }
   }
 );
@@ -983,22 +571,11 @@ app.delete(
 
 app.get('/api/news', async (req, res) => {
   try {
-    const news = await News.find({ published: true })
-      .select('-author -__v')
-      .sort('-publishDate')
-      .limit(20);
-
-    res.json({
-      success: true,
-      count: news.length,
-      data: { news },
-    });
+    const news = await News.find({ published: true }).select('-author -__v').sort('-publishDate').limit(20);
+    res.json({ success: true, count: news.length, data: { news } });
   } catch (error) {
     logger.error('List news error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar notícias.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao carregar notícias.' });
   }
 });
 
@@ -1010,7 +587,6 @@ app.post(
   async (req, res) => {
     try {
       const { title, excerpt, content, image, published } = req.body;
-
       const news = await News.create({
         title,
         excerpt,
@@ -1022,18 +598,10 @@ app.post(
       });
 
       logger.info(`News created by ${req.user.email}: ${news._id}`);
-
-      res.status(201).json({
-        success: true,
-        message: 'Notícia criada com sucesso!',
-        data: { news },
-      });
+      res.status(201).json({ success: true, message: 'Notícia criada com sucesso!', data: { news } });
     } catch (error) {
       logger.error('Create news error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao criar notícia.',
-      });
+      res.status(500).json({ success: false, message: 'Erro ao criar notícia.' });
     }
   }
 );
@@ -1046,15 +614,8 @@ app.put(
   async (req, res) => {
     try {
       const { title, excerpt, content, image, published } = req.body;
-
       const news = await News.findById(req.params.id);
-
-      if (!news) {
-        return res.status(404).json({
-          success: false,
-          message: 'Notícia não encontrada.',
-        });
-      }
+      if (!news) return res.status(404).json({ success: false, message: 'Notícia não encontrada.' });
 
       news.title = title ?? news.title;
       news.excerpt = excerpt ?? news.excerpt;
@@ -1063,26 +624,16 @@ app.put(
 
       if (published !== undefined) {
         news.published = published;
-        if (published && !news.publishDate) {
-          news.publishDate = Date.now();
-        }
+        if (published && !news.publishDate) news.publishDate = Date.now();
       }
 
       await news.save();
 
       logger.info(`News ${news._id} updated by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Notícia atualizada com sucesso!',
-        data: { news },
-      });
+      res.json({ success: true, message: 'Notícia atualizada com sucesso!', data: { news } });
     } catch (error) {
       logger.error('Update news error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao atualizar notícia.',
-      });
+      res.status(500).json({ success: false, message: 'Erro ao atualizar notícia.' });
     }
   }
 );
@@ -1095,26 +646,13 @@ app.delete(
   async (req, res) => {
     try {
       const news = await News.findByIdAndDelete(req.params.id);
-
-      if (!news) {
-        return res.status(404).json({
-          success: false,
-          message: 'Notícia não encontrada.',
-        });
-      }
+      if (!news) return res.status(404).json({ success: false, message: 'Notícia não encontrada.' });
 
       logger.info(`News ${news._id} deleted by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Notícia eliminada com sucesso!',
-      });
+      res.json({ success: true, message: 'Notícia eliminada com sucesso!' });
     } catch (error) {
       logger.error('Delete news error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao eliminar notícia.',
-      });
+      res.status(500).json({ success: false, message: 'Erro ao eliminar notícia.' });
     }
   }
 );
@@ -1125,124 +663,57 @@ app.delete(
 
 app.get('/api/slides', async (req, res) => {
   try {
-    const slides = await Slide.find({ active: true })
-      .sort('order')
-      .select('-__v');
-
-    res.json({
-      success: true,
-      count: slides.length,
-      data: { slides },
-    });
+    const slides = await Slide.find({ active: true }).sort('order').select('-__v');
+    res.json({ success: true, count: slides.length, data: { slides } });
   } catch (error) {
     logger.error('List slides error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar slides.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao carregar slides.' });
   }
 });
 
-app.post(
-  '/api/slides',
-  authenticate,
-  authorize('admin'),
-  async (req, res) => {
-    try {
-      const { title, image, order, active } = req.body;
+app.post('/api/slides', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { title, image, order, active } = req.body;
+    const slide = await Slide.create({ title, image, order: order || 0, active: active !== undefined ? active : true });
 
-      const slide = await Slide.create({
-        title,
-        image,
-        order: order || 0,
-        active: active !== undefined ? active : true,
-      });
-
-      logger.info(`Slide created by ${req.user.email}: ${slide._id}`);
-
-      res.status(201).json({
-        success: true,
-        message: 'Slide criado com sucesso!',
-        data: { slide },
-      });
-    } catch (error) {
-      logger.error('Create slide error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao criar slide.',
-      });
-    }
+    logger.info(`Slide created by ${req.user.email}: ${slide._id}`);
+    res.status(201).json({ success: true, message: 'Slide criado com sucesso!', data: { slide } });
+  } catch (error) {
+    logger.error('Create slide error:', error);
+    res.status(500).json({ success: false, message: 'Erro ao criar slide.' });
   }
-);
+});
 
-app.put(
-  '/api/slides/:id',
-  authenticate,
-  authorize('admin'),
-  async (req, res) => {
-    try {
-      const { title, image, order, active } = req.body;
+app.put('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { title, image, order, active } = req.body;
+    const slide = await Slide.findByIdAndUpdate(
+      req.params.id,
+      { title, image, order, active },
+      { new: true, runValidators: true }
+    );
+    if (!slide) return res.status(404).json({ success: false, message: 'Slide não encontrado.' });
 
-      const slide = await Slide.findByIdAndUpdate(
-        req.params.id,
-        { title, image, order, active },
-        { new: true, runValidators: true }
-      );
-
-      if (!slide) {
-        return res.status(404).json({
-          success: false,
-          message: 'Slide não encontrado.',
-        });
-      }
-
-      logger.info(`Slide ${slide._id} updated by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Slide atualizado com sucesso!',
-        data: { slide },
-      });
-    } catch (error) {
-      logger.error('Update slide error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao atualizar slide.',
-      });
-    }
+    logger.info(`Slide ${slide._id} updated by ${req.user.email}`);
+    res.json({ success: true, message: 'Slide atualizado com sucesso!', data: { slide } });
+  } catch (error) {
+    logger.error('Update slide error:', error);
+    res.status(500).json({ success: false, message: 'Erro ao atualizar slide.' });
   }
-);
+});
 
-app.delete(
-  '/api/slides/:id',
-  authenticate,
-  authorize('admin'),
-  async (req, res) => {
-    try {
-      const slide = await Slide.findByIdAndDelete(req.params.id);
+app.delete('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const slide = await Slide.findByIdAndDelete(req.params.id);
+    if (!slide) return res.status(404).json({ success: false, message: 'Slide não encontrado.' });
 
-      if (!slide) {
-        return res.status(404).json({
-          success: false,
-          message: 'Slide não encontrado.',
-        });
-      }
-
-      logger.info(`Slide ${slide._id} deleted by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Slide eliminado com sucesso!',
-      });
-    } catch (error) {
-      logger.error('Delete slide error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao eliminar slide.',
-      });
-    }
+    logger.info(`Slide ${slide._id} deleted by ${req.user.email}`);
+    res.json({ success: true, message: 'Slide eliminado com sucesso!' });
+  } catch (error) {
+    logger.error('Delete slide error:', error);
+    res.status(500).json({ success: false, message: 'Erro ao eliminar slide.' });
   }
-);
+});
 
 // ============================================
 // 11. ROTAS DE LINKS
@@ -1250,124 +721,53 @@ app.delete(
 
 app.get('/api/links', async (req, res) => {
   try {
-    const links = await Link.find({ active: true })
-      .sort('order')
-      .select('-__v');
-
-    res.json({
-      success: true,
-      count: links.length,
-      data: { links },
-    });
+    const links = await Link.find({ active: true }).sort('order').select('-__v');
+    res.json({ success: true, count: links.length, data: { links } });
   } catch (error) {
     logger.error('List links error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar links.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao carregar links.' });
   }
 });
 
-app.post(
-  '/api/links',
-  authenticate,
-  authorize('admin'),
-  async (req, res) => {
-    try {
-      const { title, url, order, active } = req.body;
+app.post('/api/links', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { title, url, order, active } = req.body;
+    const link = await Link.create({ title, url, order: order || 0, active: active !== undefined ? active : true });
 
-      const link = await Link.create({
-        title,
-        url,
-        order: order || 0,
-        active: active !== undefined ? active : true,
-      });
-
-      logger.info(`Link created by ${req.user.email}: ${link._id}`);
-
-      res.status(201).json({
-        success: true,
-        message: 'Link criado com sucesso!',
-        data: { link },
-      });
-    } catch (error) {
-      logger.error('Create link error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao criar link.',
-      });
-    }
+    logger.info(`Link created by ${req.user.email}: ${link._id}`);
+    res.status(201).json({ success: true, message: 'Link criado com sucesso!', data: { link } });
+  } catch (error) {
+    logger.error('Create link error:', error);
+    res.status(500).json({ success: false, message: 'Erro ao criar link.' });
   }
-);
+});
 
-app.put(
-  '/api/links/:id',
-  authenticate,
-  authorize('admin'),
-  async (req, res) => {
-    try {
-      const { title, url, order, active } = req.body;
+app.put('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { title, url, order, active } = req.body;
+    const link = await Link.findByIdAndUpdate(req.params.id, { title, url, order, active }, { new: true, runValidators: true });
+    if (!link) return res.status(404).json({ success: false, message: 'Link não encontrado.' });
 
-      const link = await Link.findByIdAndUpdate(
-        req.params.id,
-        { title, url, order, active },
-        { new: true, runValidators: true }
-      );
-
-      if (!link) {
-        return res.status(404).json({
-          success: false,
-          message: 'Link não encontrado.',
-        });
-      }
-
-      logger.info(`Link ${link._id} updated by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Link atualizado com sucesso!',
-        data: { link },
-      });
-    } catch (error) {
-      logger.error('Update link error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao atualizar link.',
-      });
-    }
+    logger.info(`Link ${link._id} updated by ${req.user.email}`);
+    res.json({ success: true, message: 'Link atualizado com sucesso!', data: { link } });
+  } catch (error) {
+    logger.error('Update link error:', error);
+    res.status(500).json({ success: false, message: 'Erro ao atualizar link.' });
   }
-);
+});
 
-app.delete(
-  '/api/links/:id',
-  authenticate,
-  authorize('admin'),
-  async (req, res) => {
-    try {
-      const link = await Link.findByIdAndDelete(req.params.id);
+app.delete('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const link = await Link.findByIdAndDelete(req.params.id);
+    if (!link) return res.status(404).json({ success: false, message: 'Link não encontrado.' });
 
-      if (!link) {
-        return res.status(404).json({
-          success: false,
-          message: 'Link não encontrado.',
-        });
-      }
-
-      logger.info(`Link ${link._id} deleted by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Link eliminado com sucesso!',
-      });
-    } catch (error) {
-      logger.error('Delete link error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao eliminar link.',
-      });
-    }
+    logger.info(`Link ${link._id} deleted by ${req.user.email}`);
+    res.json({ success: true, message: 'Link eliminado com sucesso!' });
+  } catch (error) {
+    logger.error('Delete link error:', error);
+    res.status(500).json({ success: false, message: 'Erro ao eliminar link.' });
   }
-);
+});
 
 // ============================================
 // 12. ROTAS DE ADMINISTRAÇÃO
@@ -1375,21 +775,11 @@ app.delete(
 
 app.get('/api/admin/users', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const users = await User.find()
-      .select('-password -verificationToken -passwordResetToken')
-      .sort('-createdAt');
-
-    res.json({
-      success: true,
-      count: users.length,
-      data: { users },
-    });
+    const users = await User.find().select('-password -verificationToken -passwordResetToken').sort('-createdAt');
+    res.json({ success: true, count: users.length, data: { users } });
   } catch (error) {
     logger.error('List users error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar utilizadores.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao carregar utilizadores.' });
   }
 });
 
@@ -1401,40 +791,17 @@ app.patch(
   async (req, res) => {
     try {
       const { role } = req.body;
+      if (!['user', 'moderator', 'admin'].includes(role))
+        return res.status(400).json({ success: false, message: 'Role inválida.' });
 
-      if (!['user', 'moderator', 'admin'].includes(role)) {
-        return res.status(400).json({
-          success: false,
-          message: 'Role inválida.',
-        });
-      }
-
-      const user = await User.findByIdAndUpdate(
-        req.params.id,
-        { role },
-        { new: true }
-      ).select('-password');
-
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: 'Utilizador não encontrado.',
-        });
-      }
+      const user = await User.findByIdAndUpdate(req.params.id, { role }, { new: true }).select('-password');
+      if (!user) return res.status(404).json({ success: false, message: 'Utilizador não encontrado.' });
 
       logger.info(`User ${user.email} role updated to ${role} by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Role atualizada com sucesso!',
-        data: { user },
-      });
+      res.json({ success: true, message: 'Role atualizada com sucesso!', data: { user } });
     } catch (error) {
       logger.error('Update user role error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao atualizar role.',
-      });
+      res.status(500).json({ success: false, message: 'Erro ao atualizar role.' });
     }
   }
 );
@@ -1446,94 +813,64 @@ app.delete(
   auditLog('user_delete', 'User'),
   async (req, res) => {
     try {
-      if (req.params.id === req.user._id.toString()) {
-        return res.status(400).json({
-          success: false,
-          message: 'Não pode eliminar a sua própria conta.',
-        });
-      }
+      if (req.params.id === req.user._id.toString())
+        return res.status(400).json({ success: false, message: 'Não pode eliminar a sua própria conta.' });
 
       const user = await User.findByIdAndDelete(req.params.id);
-
-      if (!user) {
-        return res.status(404).json({
-          success: false,
-          message: 'Utilizador não encontrado.',
-        });
-      }
+      if (!user) return res.status(404).json({ success: false, message: 'Utilizador não encontrado.' });
 
       await Incident.deleteMany({ user: user._id });
 
       logger.info(`User ${user.email} deleted by ${req.user.email}`);
-
-      res.json({
-        success: true,
-        message: 'Utilizador eliminado com sucesso!',
-      });
+      res.json({ success: true, message: 'Utilizador eliminado com sucesso!' });
     } catch (error) {
       logger.error('Delete user error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao eliminar utilizador.',
-      });
+      res.status(500).json({ success: false, message: 'Erro ao eliminar utilizador.' });
     }
   }
 );
 
-app.get(
-  '/api/admin/stats',
-  authenticate,
-  authorize('moderator', 'admin'),
-  async (req, res) => {
-    try {
-      const [
-        totalUsers,
-        totalIncidents,
-        pendingIncidents,
-        analyzingIncidents,
-        inProgressIncidents,
-        resolvedIncidents,
-        totalNews,
-        publishedNews,
-      ] = await Promise.all([
-        User.countDocuments(),
-        Incident.countDocuments(),
-        Incident.countDocuments({ status: 'pending' }),
-        Incident.countDocuments({ status: 'analyzing' }),
-        Incident.countDocuments({ status: 'inProgress' }),
-        Incident.countDocuments({ status: 'resolved' }),
-        News.countDocuments(),
-        News.countDocuments({ published: true }),
-      ]);
+app.get('/api/admin/stats', authenticate, authorize('moderator', 'admin'), async (req, res) => {
+  try {
+    const [
+      totalUsers,
+      totalIncidents,
+      pendingIncidents,
+      analyzingIncidents,
+      inProgressIncidents,
+      resolvedIncidents,
+      totalNews,
+      publishedNews,
+    ] = await Promise.all([
+      User.countDocuments(),
+      Incident.countDocuments(),
+      Incident.countDocuments({ status: 'pending' }),
+      Incident.countDocuments({ status: 'analyzing' }),
+      Incident.countDocuments({ status: 'inProgress' }),
+      Incident.countDocuments({ status: 'resolved' }),
+      News.countDocuments(),
+      News.countDocuments({ published: true }),
+    ]);
 
-      res.json({
-        success: true,
-        data: {
-          users: {
-            total: totalUsers,
-          },
-          incidents: {
-            total: totalIncidents,
-            pending: pendingIncidents,
-            analyzing: analyzingIncidents,
-            inProgress: inProgressIncidents,
-            resolved: resolvedIncidents,
-          },
-          news: {
-            total: totalNews,
-            published: publishedNews,
-          },
+    res.json({
+      success: true,
+      data: {
+        users: { total: totalUsers },
+        incidents: {
+          total: totalIncidents,
+          pending: pendingIncidents,
+          analyzing: analyzingIncidents,
+          inProgress: inProgressIncidents,
+          resolved: resolvedIncidents,
         },
-      });
-    } catch (error) {
-      logger.error('Get stats error:', error);
-      res.status(500).json({
-        success: false,
-        message: 'Erro ao carregar estatísticas.',
-      });
-    }
+        news: { total: totalNews, published: publishedNews },
+      },
+    });
+  } catch (error) {
+    logger.error('Get stats error:', error);
+    res.status(500).json({ success: false, message: 'Erro ao carregar estatísticas.' });
   }
-);
+});
 
 app.get('/api/admin/audit-logs', authenticate, authorize('admin'), async (req, res) => {
   try {
@@ -1553,18 +890,11 @@ app.get('/api/admin/audit-logs', authenticate, authorize('admin'), async (req, r
 
     res.json({
       success: true,
-      data: {
-        logs,
-        totalPages: Math.ceil(count / Number(limit)),
-        currentPage: Number(page),
-      },
+      data: { logs, totalPages: Math.ceil(count / Number(limit)), currentPage: Number(page) },
     });
   } catch (error) {
     logger.error('Get audit logs error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar logs.',
-    });
+    res.status(500).json({ success: false, message: 'Erro ao carregar logs.' });
   }
 });
 
@@ -1572,24 +902,12 @@ app.get('/api/admin/audit-logs', authenticate, authorize('admin'), async (req, r
 // 13. TRATAMENTO DE ERROS
 // ============================================
 
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Rota não encontrada.',
-  });
-});
+app.use('*', (req, res) => res.status(404).json({ success: false, message: 'Rota não encontrada.' }));
 
 app.use((err, req, res, next) => {
   logger.error('Server error:', err);
-
-  const message =
-    process.env.NODE_ENV === 'production' ? 'Erro interno do servidor.' : err.message;
-
-  res.status(err.status || 500).json({
-    success: false,
-    message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }),
-  });
+  const message = process.env.NODE_ENV === 'production' ? 'Erro interno do servidor.' : err.message;
+  res.status(err.status || 500).json({ success: false, message, ...(process.env.NODE_ENV !== 'production' && { stack: err.stack }) });
 });
 
 // ============================================
@@ -1597,22 +915,18 @@ app.use((err, req, res, next) => {
 // ============================================
 
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI =
-  process.env.MONGODB_URI || 'mongodb://localhost:27017/freguesia-portal';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/freguesia-portal';
 
 mongoose.set('strictQuery', false);
 
 mongoose
-  .connect(MONGODB_URI)
+  .connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
   .then(() => {
-    logger.info('MongoDB conectado com sucesso');
-
+    logger.info(`MongoDB conectado com sucesso em ${MONGODB_URI}`);
     app.listen(PORT, () => {
-      logger.info(
-        `Servidor rodando em modo ${process.env.NODE_ENV || 'development'} na porta ${PORT}`
-      );
-      console.log(`🚀 Servidor iniciado: http://localhost:${PORT}`);
-      console.log(`📚 API disponível em: http://localhost:${PORT}/api`);
+      logger.info(`Servidor em ${process.env.NODE_ENV || 'development'} na porta ${PORT}`);
+      console.log(`🚀 Servidor: http://localhost:${PORT}`);
+      console.log(`📚 API: http://localhost:${PORT}/api`);
     });
   })
   .catch((error) => {
