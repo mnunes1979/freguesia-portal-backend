@@ -508,6 +508,27 @@ const validateIncident = [
     .withMessage('Coordenadas GPS inválidas')
 ];
 
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ 
+    success: true, 
+    message: 'API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/', (req, res) => {
+  res.status(200).json({ 
+    success: true, 
+    message: 'Portal Freguesia API - Running',
+    endpoints: {
+      health: '/health',
+      api: '/api',
+      docs: 'https://github.com/mnunes1979/freguesia-portal-backend'
+    }
+  });
+});
+
 // ============================================
 // 7. ROTAS DE AUTENTICAÇÃO
 // ============================================
