@@ -508,7 +508,10 @@ const validateIncident = [
     .withMessage('Coordenadas GPS inválidas')
 ];
 
-// Health check endpoint
+// ============================================
+// HEALTH CHECK ENDPOINTS
+// ============================================
+
 app.get('/health', (req, res) => {
   res.status(200).json({ 
     success: true, 
