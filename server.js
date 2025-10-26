@@ -1,8 +1,5 @@
 // ============================================
-// SERVER.JS - Backend Seguro (CORRIGIDO)
-// Portal da Freguesia - Versão Corrigida
-// Data: 25/10/2025
-// Correções: CORS múltiplas origens + Trust Proxy
+// SERVER.JS - Backend Seguro Portal Freguesia
 // ============================================
 
 const express = require('express');
@@ -24,14 +21,9 @@ const crypto = require('crypto');
 const app = express();
 
 // ============================================
-// 1. CONFIGURAÇÃO DE TRUST PROXY (IMPORTANTE!)
+// 1. CONFIGURAÇÃO DE SEGURANÇA
 // ============================================
-// CORRIGIDO: Necessário quando atrás de proxy (EasyPanel, Nginx, etc)
-app.set('trust proxy', 1);
 
-// ============================================
-// 2. CONFIGURAÇÃO DE SEGURANÇA
-// ============================================
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -48,58 +40,58 @@ app.use(helmet({
   }
 }));
 
-// ============================================
-// 3. CORS CONFIGURADO PARA MÚLTIPLAS ORIGENS
-// ============================================
-// CORRIGIDO: Aceita Frontend + Backoffice + localhost para dev
+// Configuração de CORS para múltiplas origens
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
   ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : ['http://localhost:3000', 'http://localhost:5173'];
+  : [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173'
+    ];
+
+console.log('🔐 CORS - Origens permitidas:', allowedOrigins);
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Permite requests sem origem (mobile apps, curl, Postman)
-    if (!origin) return callback(null, true);
+    // Permitir requisições sem origin (Postman, curl, etc)
+    if (!origin) {
+      return callback(null, true);
+    }
     
-    if (allowedOrigins.indexOf(origin) !== -1) {
+    // Verificar se a origem está permitida
+    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
       callback(null, true);
     } else {
-      console.log('❌ CORS bloqueado para origem:', origin);
-      console.log('✅ Origens permitidas:', allowedOrigins);
-      callback(new Error('Não permitido por CORS'));
+      console.log('❌ CORS bloqueou origem:', origin);
+      callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true,
   optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400 // 24 horas
 };
-
 app.use(cors(corsOptions));
 
-// Log das origens permitidas ao iniciar
-console.log('🔐 CORS - Origens permitidas:', allowedOrigins);
-
-// Body parser com limite
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
-
-// Data sanitization
 app.use(mongoSanitize());
 app.use(xss());
 app.use(hpp());
 app.use(compression());
 
 // ============================================
-// 4. RATE LIMITING (CORRIGIDO)
+// 2. RATE LIMITING
 // ============================================
+
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: 'Demasiados pedidos deste IP, tente novamente mais tarde.',
   standardHeaders: true,
   legacyHeaders: false,
-  trustProxy: true
 });
 
 const authLimiter = rateLimit({
@@ -107,14 +99,12 @@ const authLimiter = rateLimit({
   max: 5,
   message: 'Demasiadas tentativas de login. Conta temporariamente bloqueada.',
   skipSuccessfulRequests: true,
-  trustProxy: true
 });
 
 const incidentLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
   message: 'Limite de incidências atingido. Tente novamente mais tarde.',
-  trustProxy: true
 });
 
 app.use('/api/', generalLimiter);
@@ -122,18 +112,17 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 
 // ============================================
-// 5. LOGGING SEGURO
+// 3. LOGGING SEGURO
 // ============================================
+
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.json()
+    winston.format.json() // JSON com timestamps (ideal para Easypanel)
   ),
   transports: [
-    new winston.transports.Console({
-      format: winston.format.simple(),
-    })
+    new winston.transports.Console()
   ],
 });
 
@@ -142,8 +131,9 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // ============================================
-// 6. MODELOS DE DADOS
+// 4. MODELOS DE DADOS
 // ============================================
+
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -372,7 +362,9 @@ const auditSchema = new mongoose.Schema({
   action: {
     type: String,
     required: true,
-    enum: ['login', 'logout', 'register', 'password_change', 'incident_create', 'incident_update', 'incident_delete', 'user_update', 'user_delete', 'news_create', 'news_update', 'news_delete']
+    enum: ['login', 'logout', 'register', 'password_change', 'incident_create', 
+           'incident_update', 'incident_delete', 'user_update', 'user_delete', 
+           'news_create', 'news_update', 'news_delete']
   },
   resource: {
     type: String,
@@ -394,8 +386,9 @@ auditSchema.index({ action: 1, timestamp: -1 });
 const AuditLog = mongoose.model('AuditLog', auditSchema);
 
 // ============================================
-// 7. MIDDLEWARES DE AUTENTICAÇÃO
+// 5. MIDDLEWARES DE AUTENTICAÇÃO
 // ============================================
+
 const generateToken = (userId) => {
   return jwt.sign(
     { id: userId },
@@ -439,580 +432,7 @@ const authenticate = async (req, res, next) => {
     
     req.user = user;
     next();
-    
   } catch (error) {
-    logger.error({ msg: 'List news error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar notícias.'
-    });
-  }
-});
-
-app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('news_create', 'News'), async (req, res) => {
-  try {
-    const { title, excerpt, content, image, published } = req.body;
-
-    const news = await News.create({
-      title,
-      excerpt,
-      content,
-      image,
-      author: req.user._id,
-      published: published || false,
-      publishDate: published ? Date.now() : null
-    });
-
-    logger.info({ msg: 'News created', newsId: news._id, author: req.user.email });
-
-    res.status(201).json({
-      success: true,
-      message: 'Notícia criada com sucesso!',
-      data: { news }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Create news error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao criar notícia.'
-    });
-  }
-});
-
-app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog('news_update', 'News'), async (req, res) => {
-  try {
-    const { title, excerpt, content, image, published } = req.body;
-
-    const news = await News.findById(req.params.id);
-
-    if (!news) {
-      return res.status(404).json({
-        success: false,
-        message: 'Notícia não encontrada.'
-      });
-    }
-
-    news.title = title || news.title;
-    news.excerpt = excerpt || news.excerpt;
-    news.content = content || news.content;
-    news.image = image || news.image;
-
-    if (published !== undefined) {
-      news.published = published;
-      if (published && !news.publishDate) {
-        news.publishDate = Date.now();
-      }
-    }
-
-    await news.save();
-
-    logger.info({ msg: 'News updated', newsId: news._id, moderator: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Notícia atualizada com sucesso!',
-      data: { news }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Update news error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao atualizar notícia.'
-    });
-  }
-});
-
-app.delete('/api/news/:id', authenticate, authorize('admin'), auditLog('news_delete', 'News'), async (req, res) => {
-  try {
-    const news = await News.findByIdAndDelete(req.params.id);
-
-    if (!news) {
-      return res.status(404).json({
-        success: false,
-        message: 'Notícia não encontrada.'
-      });
-    }
-
-    logger.info({ msg: 'News deleted', newsId: news._id, admin: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Notícia eliminada com sucesso!'
-    });
-  } catch (error) {
-    logger.error({ msg: 'Delete news error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao eliminar notícia.'
-    });
-  }
-});
-
-// ============================================
-// 13. ROTAS DE SLIDES
-// ============================================
-app.get('/api/slides', async (req, res) => {
-  try {
-    const slides = await Slide.find({ active: true })
-      .sort('order')
-      .select('-__v');
-
-    res.json({
-      success: true,
-      count: slides.length,
-      data: { slides }
-    });
-  } catch (error) {
-    logger.error({ msg: 'List slides error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar slides.'
-    });
-  }
-});
-
-app.post('/api/slides', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { title, image, order, active } = req.body;
-
-    const slide = await Slide.create({
-      title,
-      image,
-      order: order || 0,
-      active: active !== undefined ? active : true
-    });
-
-    logger.info({ msg: 'Slide created', slideId: slide._id, admin: req.user.email });
-
-    res.status(201).json({
-      success: true,
-      message: 'Slide criado com sucesso!',
-      data: { slide }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Create slide error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao criar slide.'
-    });
-  }
-});
-
-app.put('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { title, image, order, active } = req.body;
-
-    const slide = await Slide.findByIdAndUpdate(
-      req.params.id,
-      { title, image, order, active },
-      { new: true, runValidators: true }
-    );
-
-    if (!slide) {
-      return res.status(404).json({
-        success: false,
-        message: 'Slide não encontrado.'
-      });
-    }
-
-    logger.info({ msg: 'Slide updated', slideId: slide._id, admin: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Slide atualizado com sucesso!',
-      data: { slide }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Update slide error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao atualizar slide.'
-    });
-  }
-});
-
-app.delete('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const slide = await Slide.findByIdAndDelete(req.params.id);
-
-    if (!slide) {
-      return res.status(404).json({
-        success: false,
-        message: 'Slide não encontrado.'
-      });
-    }
-
-    logger.info({ msg: 'Slide deleted', slideId: slide._id, admin: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Slide eliminado com sucesso!'
-    });
-  } catch (error) {
-    logger.error({ msg: 'Delete slide error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao eliminar slide.'
-    });
-  }
-});
-
-// ============================================
-// 14. ROTAS DE LINKS
-// ============================================
-app.get('/api/links', async (req, res) => {
-  try {
-    const links = await Link.find({ active: true })
-      .sort('order')
-      .select('-__v');
-
-    res.json({
-      success: true,
-      count: links.length,
-      data: { links }
-    });
-  } catch (error) {
-    logger.error({ msg: 'List links error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar links.'
-    });
-  }
-});
-
-app.post('/api/links', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { title, url, order, active } = req.body;
-
-    const link = await Link.create({
-      title,
-      url,
-      order: order || 0,
-      active: active !== undefined ? active : true
-    });
-
-    logger.info({ msg: 'Link created', linkId: link._id, admin: req.user.email });
-
-    res.status(201).json({
-      success: true,
-      message: 'Link criado com sucesso!',
-      data: { link }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Create link error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao criar link.'
-    });
-  }
-});
-
-app.put('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { title, url, order, active } = req.body;
-
-    const link = await Link.findByIdAndUpdate(
-      req.params.id,
-      { title, url, order, active },
-      { new: true, runValidators: true }
-    );
-
-    if (!link) {
-      return res.status(404).json({
-        success: false,
-        message: 'Link não encontrado.'
-      });
-    }
-
-    logger.info({ msg: 'Link updated', linkId: link._id, admin: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Link atualizado com sucesso!',
-      data: { link }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Update link error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao atualizar link.'
-    });
-  }
-});
-
-app.delete('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const link = await Link.findByIdAndDelete(req.params.id);
-
-    if (!link) {
-      return res.status(404).json({
-        success: false,
-        message: 'Link não encontrado.'
-      });
-    }
-
-    logger.info({ msg: 'Link deleted', linkId: link._id, admin: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Link eliminado com sucesso!'
-    });
-  } catch (error) {
-    logger.error({ msg: 'Delete link error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao eliminar link.'
-    });
-  }
-});
-
-// ============================================
-// 15. ROTAS DE ADMINISTRAÇÃO
-// ============================================
-app.get('/api/admin/users', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const users = await User.find()
-      .select('-password -verificationToken -passwordResetToken')
-      .sort('-createdAt');
-
-    res.json({
-      success: true,
-      count: users.length,
-      data: { users }
-    });
-  } catch (error) {
-    logger.error({ msg: 'List users error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar utilizadores.'
-    });
-  }
-});
-
-app.patch('/api/admin/users/:id/role', authenticate, authorize('admin'), auditLog('user_update', 'User'), async (req, res) => {
-  try {
-    const { role } = req.body;
-
-    if (!['user', 'moderator', 'admin'].includes(role)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Role inválida.'
-      });
-    }
-
-    const user = await User.findByIdAndUpdate(
-      req.params.id,
-      { role },
-      { new: true }
-    ).select('-password');
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Utilizador não encontrado.'
-      });
-    }
-
-    logger.info({ msg: 'User role updated', userId: user.email, role, admin: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Role atualizada com sucesso!',
-      data: { user }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Update user role error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao atualizar role.'
-    });
-  }
-});
-
-app.delete('/api/admin/users/:id', authenticate, authorize('admin'), auditLog('user_delete', 'User'), async (req, res) => {
-  try {
-    if (req.params.id === req.user._id.toString()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Não pode eliminar a sua própria conta.'
-      });
-    }
-
-    const user = await User.findByIdAndDelete(req.params.id);
-
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: 'Utilizador não encontrado.'
-      });
-    }
-
-    await Incident.deleteMany({ user: user._id });
-
-    logger.info({ msg: 'User deleted', userId: user.email, admin: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Utilizador eliminado com sucesso!'
-    });
-  } catch (error) {
-    logger.error({ msg: 'Delete user error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao eliminar utilizador.'
-    });
-  }
-});
-
-app.get('/api/admin/stats', authenticate, authorize('moderator', 'admin'), async (req, res) => {
-  try {
-    const [
-      totalUsers,
-      totalIncidents,
-      pendingIncidents,
-      analyzingIncidents,
-      inProgressIncidents,
-      resolvedIncidents,
-      totalNews,
-      publishedNews
-    ] = await Promise.all([
-      User.countDocuments(),
-      Incident.countDocuments(),
-      Incident.countDocuments({ status: 'pending' }),
-      Incident.countDocuments({ status: 'analyzing' }),
-      Incident.countDocuments({ status: 'inProgress' }),
-      Incident.countDocuments({ status: 'resolved' }),
-      News.countDocuments(),
-      News.countDocuments({ published: true })
-    ]);
-
-    res.json({
-      success: true,
-      data: {
-        users: {
-          total: totalUsers
-        },
-        incidents: {
-          total: totalIncidents,
-          pending: pendingIncidents,
-          analyzing: analyzingIncidents,
-          inProgress: inProgressIncidents,
-          resolved: resolvedIncidents
-        },
-        news: {
-          total: totalNews,
-          published: publishedNews
-        }
-      }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Get stats error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar estatísticas.'
-    });
-  }
-});
-
-app.get('/api/admin/audit-logs', authenticate, authorize('admin'), async (req, res) => {
-  try {
-    const { page = 1, limit = 50, action, userId } = req.query;
-
-    const query = {};
-    if (action) query.action = action;
-    if (userId) query.user = userId;
-
-    const logs = await AuditLog.find(query)
-      .populate('user', 'name email')
-      .sort('-timestamp')
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
-
-    const count = await AuditLog.countDocuments(query);
-
-    res.json({
-      success: true,
-      data: {
-        logs,
-        totalPages: Math.ceil(count / limit),
-        currentPage: page
-      }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Get audit logs error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar logs.'
-    });
-  }
-});
-
-// ============================================
-// 16. TRATAMENTO DE ERROS
-// ============================================
-app.use('*', (req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Rota não encontrada.'
-  });
-});
-
-app.use((err, req, res, next) => {
-  logger.error({ msg: 'Server error', error: err });
-  
-  const message = process.env.NODE_ENV === 'production'
-    ? 'Erro interno do servidor.'
-    : err.message;
-
-  res.status(err.status || 500).json({
-    success: false,
-    message,
-    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
-  });
-});
-
-// ============================================
-// 17. LIGAÇÃO À BASE DE DADOS E SERVIDOR
-// ============================================
-const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/freguesia-portal';
-
-mongoose.set('strictQuery', false);
-
-mongoose.connect(MONGODB_URI)
-  .then(() => {
-    logger.info({ msg: 'MongoDB conectado com sucesso', uri: MONGODB_URI.replace(/:([^:@]{1,})@/, ':<user>:<pass>@') });
-    
-    app.listen(PORT, () => {
-      logger.info({ msg: 'Servidor iniciado', port: PORT, mode: process.env.NODE_ENV || 'development' });
-      console.log(`🚀 Servidor iniciado: http://localhost:${PORT}`);
-      console.log(`📚 API disponível em: http://localhost:${PORT}/api`);
-    });
-  })
-  .catch((error) => {
-    logger.error({ msg: 'Erro ao conectar ao MongoDB', error });
-    process.exit(1);
-  });
-
-process.on('unhandledRejection', (err) => {
-  logger.error({ msg: 'UNHANDLED REJECTION! Shutting down...', error: err });
-  process.exit(1);
-});
-
-process.on('uncaughtException', (err) => {
-  logger.error({ msg: 'UNCAUGHT EXCEPTION! Shutting down...', error: err });
-  process.exit(1);
-});
-
-process.on('SIGTERM', () => {
-  logger.info({ msg: 'SIGTERM received. Shutting down gracefully...' });
-  mongoose.connection.close(() => {
-    logger.info({ msg: 'MongoDB connection closed.' });
-    process.exit(0);
-  });
-});
-
-module.exports = app;
     logger.error({ msg: 'Authentication error', error });
     return res.status(401).json({
       success: false,
@@ -1033,6 +453,7 @@ const authorize = (...roles) => {
   };
 };
 
+// ✅ Middleware de auditoria corrigido
 const auditLog = (action, resource) => {
   return async (req, res, next) => {
     try {
@@ -1046,7 +467,8 @@ const auditLog = (action, resource) => {
         details: {
           body: req.body,
           params: req.params
-        }
+        },
+        timestamp: new Date()
       });
     } catch (error) {
       logger.error({ msg: 'Audit log error', error });
@@ -1056,8 +478,9 @@ const auditLog = (action, resource) => {
 };
 
 // ============================================
-// 8. VALIDAÇÃO DE INPUTS
+// 6. VALIDAÇÃO DE INPUTS
 // ============================================
+
 const validateRegistration = [
   body('name')
     .trim()
@@ -1112,19 +535,20 @@ const validateIncident = [
 ];
 
 // ============================================
-// 9. HEALTH CHECK ENDPOINTS
+// HEALTH CHECK ENDPOINTS
 // ============================================
+
 app.get('/health', (req, res) => {
-  res.status(200).json({
-    success: true,
+  res.status(200).json({ 
+    success: true, 
     message: 'API is running',
     timestamp: new Date().toISOString()
   });
 });
 
 app.get('/', (req, res) => {
-  res.status(200).json({
-    success: true,
+  res.status(200).json({ 
+    success: true, 
     message: 'Portal Freguesia API - Running',
     endpoints: {
       health: '/health',
@@ -1135,8 +559,9 @@ app.get('/', (req, res) => {
 });
 
 // ============================================
-// 10. ROTAS DE AUTENTICAÇÃO
+// 7. ROTAS DE AUTENTICAÇÃO
 // ============================================
+
 app.post('/api/auth/register', validateRegistration, async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -1146,9 +571,9 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
         errors: errors.array()
       });
     }
-
+    
     const { name, email, phone, password, consentGiven } = req.body;
-
+    
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({
@@ -1156,10 +581,10 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
         message: 'Email já registado.'
       });
     }
-
+    
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
-
+    
     const user = await User.create({
       name,
       email,
@@ -1169,9 +594,9 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
       verificationToken,
       verificationTokenExpires
     });
-
+    
     logger.info({ msg: 'New user registered', email });
-
+    
     await AuditLog.create({
       user: user._id,
       action: 'register',
@@ -1180,7 +605,7 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
       ipAddress: req.ip,
       userAgent: req.get('user-agent')
     });
-
+    
     res.status(201).json({
       success: true,
       message: 'Conta criada com sucesso! Verifique o seu email para ativar a conta.',
@@ -1207,50 +632,52 @@ app.post('/api/auth/login', validateLogin, async (req, res) => {
         errors: errors.array()
       });
     }
-
+    
     const { email, password } = req.body;
-
+    
     const user = await User.findOne({ email }).select('+password');
-
+    
     if (!user) {
       return res.status(401).json({
         success: false,
         message: 'Credenciais inválidas.'
       });
     }
-
+    
     if (user.isLocked()) {
       return res.status(423).json({
         success: false,
         message: 'Conta temporariamente bloqueada devido a múltiplas tentativas falhadas.'
       });
     }
-
+    
     const isMatch = await user.comparePassword(password);
-
+    
     if (!isMatch) {
       user.loginAttempts += 1;
+      
       if (user.loginAttempts >= 5) {
         user.lockUntil = Date.now() + 30 * 60 * 1000;
         logger.warn({ msg: 'Account locked due to failed attempts', email });
       }
+      
       await user.save();
-
+      
       return res.status(401).json({
         success: false,
         message: 'Credenciais inválidas.'
       });
     }
-
+    
     user.loginAttempts = 0;
     user.lockUntil = undefined;
     user.lastLogin = Date.now();
     await user.save();
-
+    
     const token = generateToken(user._id);
-
+    
     logger.info({ msg: 'User logged in', email });
-
+    
     await AuditLog.create({
       user: user._id,
       action: 'login',
@@ -1259,7 +686,7 @@ app.post('/api/auth/login', validateLogin, async (req, res) => {
       ipAddress: req.ip,
       userAgent: req.get('user-agent')
     });
-
+    
     res.json({
       success: true,
       message: 'Login efetuado com sucesso!',
@@ -1289,21 +716,21 @@ app.get('/api/auth/verify/:token', async (req, res) => {
       verificationToken: req.params.token,
       verificationTokenExpires: { $gt: Date.now() }
     });
-
+    
     if (!user) {
       return res.status(400).json({
         success: false,
         message: 'Token inválido ou expirado.'
       });
     }
-
+    
     user.isVerified = true;
     user.verificationToken = undefined;
     user.verificationTokenExpires = undefined;
     await user.save();
-
+    
     logger.info({ msg: 'Email verified', email: user.email });
-
+    
     res.json({
       success: true,
       message: 'Email verificado com sucesso! Pode agora fazer login.'
@@ -1327,8 +754,9 @@ app.get('/api/auth/me', authenticate, async (req, res) => {
 });
 
 // ============================================
-// 11. ROTAS DE INCIDÊNCIAS
+// 8. ROTAS DE INCIDÊNCIAS
 // ============================================
+
 app.post('/api/incidents', authenticate, incidentLimiter, validateIncident, auditLog('incident_create', 'Incident'), async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -1338,9 +766,9 @@ app.post('/api/incidents', authenticate, incidentLimiter, validateIncident, audi
         errors: errors.array()
       });
     }
-
+    
     const { title, description, location, gps, photos } = req.body;
-
+    
     const incident = await Incident.create({
       title,
       description,
@@ -1350,9 +778,9 @@ app.post('/api/incidents', authenticate, incidentLimiter, validateIncident, audi
       user: req.user._id,
       status: 'pending'
     });
-
-    logger.info({ msg: 'Incident created', userId: req.user.email, incidentId: incident._id });
-
+    
+    logger.info({ msg: 'Incident created', user: req.user.email, incidentId: incident._id });
+    
     res.status(201).json({
       success: true,
       message: 'Incidência reportada com sucesso!',
@@ -1370,19 +798,19 @@ app.post('/api/incidents', authenticate, incidentLimiter, validateIncident, audi
 app.get('/api/incidents/public', async (req, res) => {
   try {
     const { status } = req.query;
+    
     const query = {};
-
     if (status && ['pending', 'analyzing', 'inProgress', 'resolved'].includes(status)) {
       query.status = status;
     } else if (!status) {
       query.status = { $in: ['pending', 'analyzing', 'inProgress', 'resolved'] };
     }
-
+    
     const incidents = await Incident.find(query)
       .select('-user -moderatorNotes -__v')
       .sort('-createdAt')
       .limit(100);
-
+    
     res.json({
       success: true,
       count: incidents.length,
@@ -1401,7 +829,7 @@ app.get('/api/incidents/my', authenticate, async (req, res) => {
   try {
     const incidents = await Incident.find({ user: req.user._id })
       .sort('-createdAt');
-
+    
     res.json({
       success: true,
       count: incidents.length,
@@ -1420,14 +848,14 @@ app.get('/api/incidents/:id', async (req, res) => {
   try {
     const incident = await Incident.findById(req.params.id)
       .select('-user -moderatorNotes -__v');
-
+    
     if (!incident) {
       return res.status(404).json({
         success: false,
         message: 'Incidência não encontrada.'
       });
     }
-
+    
     res.json({
       success: true,
       data: { incident }
@@ -1444,31 +872,31 @@ app.get('/api/incidents/:id', async (req, res) => {
 app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'admin'), auditLog('incident_update', 'Incident'), async (req, res) => {
   try {
     const { status, moderatorNotes } = req.body;
-
+    
     if (!['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'].includes(status)) {
       return res.status(400).json({
         success: false,
         message: 'Estado inválido.'
       });
     }
-
+    
     const incident = await Incident.findById(req.params.id).populate('user', 'email name');
-
+    
     if (!incident) {
       return res.status(404).json({
         success: false,
         message: 'Incidência não encontrada.'
       });
     }
-
+    
     incident.status = status;
     if (moderatorNotes) incident.moderatorNotes = moderatorNotes;
     if (status === 'resolved') incident.resolvedDate = Date.now();
-
+    
     await incident.save();
-
-    logger.info({ msg: 'Incident status updated', incidentId: incident._id, status, moderator: req.user.email });
-
+    
+    logger.info({ msg: 'Incident status updated', incidentId: incident._id, status, by: req.user.email });
+    
     res.json({
       success: true,
       message: 'Estado atualizado com sucesso!',
@@ -1486,16 +914,16 @@ app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'adm
 app.delete('/api/incidents/:id', authenticate, authorize('admin'), auditLog('incident_delete', 'Incident'), async (req, res) => {
   try {
     const incident = await Incident.findByIdAndDelete(req.params.id);
-
+    
     if (!incident) {
       return res.status(404).json({
         success: false,
         message: 'Incidência não encontrada.'
       });
     }
-
-    logger.info({ msg: 'Incident deleted', incidentId: incident._id, admin: req.user.email });
-
+    
+    logger.info({ msg: 'Incident deleted', incidentId: incident._id, by: req.user.email });
+    
     res.json({
       success: true,
       message: 'Incidência eliminada com sucesso!'
@@ -1510,8 +938,9 @@ app.delete('/api/incidents/:id', authenticate, authorize('admin'), auditLog('inc
 });
 
 // ============================================
-// 12. ROTAS DE NOTÍCIAS
+// 9. ROTAS DE NOTÍCIAS (corrigidas e completas)
 // ============================================
+
 app.get('/api/news', async (req, res) => {
   try {
     const news = await News.find({ published: true })
