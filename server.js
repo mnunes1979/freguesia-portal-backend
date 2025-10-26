@@ -1,7 +1,6 @@
 // ============================================
-// SERVER.JS - Backend Seguro Portal Freguesia
+// SERVER.JS - Backend Seguro (CORRIGIDO)
 // ============================================
-
 const express = require('express');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
@@ -21,9 +20,14 @@ const crypto = require('crypto');
 const app = express();
 
 // ============================================
-// 1. CONFIGURAÇÃO DE SEGURANÇA
+// 1. CONFIGURAÇÃO DE TRUST PROXY (IMPORTANTE!)
 // ============================================
+// CORRIGIDO: Necessário quando atrás de proxy (EasyPanel, Nginx, etc)
+app.set('trust proxy', 1);
 
+// ============================================
+// 2. CONFIGURAÇÃO DE SEGURANÇA
+// ============================================
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
@@ -40,10 +44,13 @@ app.use(helmet({
   }
 }));
 
-// CORS configurado para múltiplas origens
+// ============================================
+// 3. CORS CONFIGURADO PARA MÚLTIPLAS ORIGENS
+// ============================================
+// CORRIGIDO: Aceita Frontend + Backoffice + localhost para dev
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',')
-  : ['http://localhost:3000'];
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : ['http://localhost:3000', 'http://localhost:5173'];
 
 const corsOptions = {
   origin: function (origin, callback) {
@@ -54,6 +61,7 @@ const corsOptions = {
       callback(null, true);
     } else {
       console.log('❌ CORS bloqueado para origem:', origin);
+      console.log('✅ Origens permitidas:', allowedOrigins);
       callback(new Error('Não permitido por CORS'));
     }
   },
@@ -63,50 +71,32 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization']
 };
 
-// Log das origens permitidas (útil para debug)
-console.log('🔐 CORS - Origens permitidas:', allowedOrigins);
-
-const corsOptions = {
-  origin: function (origin, callback) {
-    // Permitir requisições sem origin (Postman, curl, etc)
-    if (!origin) {
-      return callback(null, true);
-    }
-    
-    // Verificar se a origem está permitida
-    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
-      callback(null, true);
-    } else {
-      console.log('❌ CORS bloqueou origem:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  optionsSuccessStatus: 200,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 86400 // 24 horas
-};
 app.use(cors(corsOptions));
 
+// Log das origens permitidas ao iniciar
+console.log('🔐 CORS - Origens permitidas:', allowedOrigins);
+
+// Body parser com limite
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
+
+// Data sanitization
 app.use(mongoSanitize());
 app.use(xss());
 app.use(hpp());
 app.use(compression());
 
 // ============================================
-// 2. RATE LIMITING
+// 4. RATE LIMITING (CORRIGIDO)
 // ============================================
-
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
   message: 'Demasiados pedidos deste IP, tente novamente mais tarde.',
   standardHeaders: true,
   legacyHeaders: false,
+  // CORRIGIDO: Usar IP real quando atrás de proxy
+  trustProxy: true
 });
 
 const authLimiter = rateLimit({
@@ -114,12 +104,14 @@ const authLimiter = rateLimit({
   max: 5,
   message: 'Demasiadas tentativas de login. Conta temporariamente bloqueada.',
   skipSuccessfulRequests: true,
+  trustProxy: true
 });
 
 const incidentLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 10,
   message: 'Limite de incidências atingido. Tente novamente mais tarde.',
+  trustProxy: true
 });
 
 app.use('/api/', generalLimiter);
@@ -127,17 +119,18 @@ app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 
 // ============================================
-// 3. LOGGING SEGURO
+// 5. LOGGING SEGURO
 // ============================================
-
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
     winston.format.timestamp(),
-    winston.format.json() // JSON com timestamps (ideal para Easypanel)
+    winston.format.json()
   ),
   transports: [
-    new winston.transports.Console()
+    new winston.transports.Console({
+      format: winston.format.simple(),
+    })
   ],
 });
 
@@ -146,9 +139,8 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // ============================================
-// 4. MODELOS DE DADOS
+// 6. MODELOS DE DADOS
 // ============================================
-
 const userSchema = new mongoose.Schema({
   name: {
     type: String,
@@ -377,9 +369,7 @@ const auditSchema = new mongoose.Schema({
   action: {
     type: String,
     required: true,
-    enum: ['login', 'logout', 'register', 'password_change', 'incident_create', 
-           'incident_update', 'incident_delete', 'user_update', 'user_delete', 
-           'news_create', 'news_update', 'news_delete']
+    enum: ['login', 'logout', 'register', 'password_change', 'incident_create', 'incident_update', 'incident_delete', 'user_update', 'user_delete', 'news_create', 'news_update', 'news_delete']
   },
   resource: {
     type: String,
@@ -401,9 +391,8 @@ auditSchema.index({ action: 1, timestamp: -1 });
 const AuditLog = mongoose.model('AuditLog', auditSchema);
 
 // ============================================
-// 5. MIDDLEWARES DE AUTENTICAÇÃO
+// 7. MIDDLEWARES DE AUTENTICAÇÃO
 // ============================================
-
 const generateToken = (userId) => {
   return jwt.sign(
     { id: userId },
@@ -447,6 +436,7 @@ const authenticate = async (req, res, next) => {
     
     req.user = user;
     next();
+    
   } catch (error) {
     logger.error({ msg: 'Authentication error', error });
     return res.status(401).json({
@@ -468,7 +458,6 @@ const authorize = (...roles) => {
   };
 };
 
-// ✅ Middleware de auditoria corrigido
 const auditLog = (action, resource) => {
   return async (req, res, next) => {
     try {
@@ -482,8 +471,7 @@ const auditLog = (action, resource) => {
         details: {
           body: req.body,
           params: req.params
-        },
-        timestamp: new Date()
+        }
       });
     } catch (error) {
       logger.error({ msg: 'Audit log error', error });
@@ -493,9 +481,8 @@ const auditLog = (action, resource) => {
 };
 
 // ============================================
-// 6. VALIDAÇÃO DE INPUTS
+// 8. VALIDAÇÃO DE INPUTS
 // ============================================
-
 const validateRegistration = [
   body('name')
     .trim()
@@ -550,20 +537,19 @@ const validateIncident = [
 ];
 
 // ============================================
-// HEALTH CHECK ENDPOINTS
+// 9. HEALTH CHECK ENDPOINTS
 // ============================================
-
 app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    success: true, 
+  res.status(200).json({
+    success: true,
     message: 'API is running',
     timestamp: new Date().toISOString()
   });
 });
 
 app.get('/', (req, res) => {
-  res.status(200).json({ 
-    success: true, 
+  res.status(200).json({
+    success: true,
     message: 'Portal Freguesia API - Running',
     endpoints: {
       health: '/health',
@@ -574,9 +560,8 @@ app.get('/', (req, res) => {
 });
 
 // ============================================
-// 7. ROTAS DE AUTENTICAÇÃO
+// 10. ROTAS DE AUTENTICAÇÃO
 // ============================================
-
 app.post('/api/auth/register', validateRegistration, async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -586,9 +571,9 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
         errors: errors.array()
       });
     }
-    
+
     const { name, email, phone, password, consentGiven } = req.body;
-    
+
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({
@@ -596,10 +581,10 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
         message: 'Email já registado.'
       });
     }
-    
+
     const verificationToken = crypto.randomBytes(32).toString('hex');
     const verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
-    
+
     const user = await User.create({
       name,
       email,
@@ -609,309 +594,9 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
       verificationToken,
       verificationTokenExpires
     });
-    
-    logger.info({ msg: 'New user registered', email });
-    
-    await AuditLog.create({
-      user: user._id,
-      action: 'register',
-      resource: 'User',
-      resourceId: user._id,
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
-    });
-    
-    res.status(201).json({
-      success: true,
-      message: 'Conta criada com sucesso! Verifique o seu email para ativar a conta.',
-      data: {
-        userId: user._id,
-        email: user.email
-      }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Registration error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao criar conta. Tente novamente.'
-    });
-  }
-});
 
-app.post('/api/auth/login', validateLogin, async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
-      });
-    }
-    
-    const { email, password } = req.body;
-    
-    const user = await User.findOne({ email }).select('+password');
-    
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas.'
-      });
-    }
-    
-    if (user.isLocked()) {
-      return res.status(423).json({
-        success: false,
-        message: 'Conta temporariamente bloqueada devido a múltiplas tentativas falhadas.'
-      });
-    }
-    
-    const isMatch = await user.comparePassword(password);
-    
-    if (!isMatch) {
-      user.loginAttempts += 1;
-      
-      if (user.loginAttempts >= 5) {
-        user.lockUntil = Date.now() + 30 * 60 * 1000;
-        logger.warn({ msg: 'Account locked due to failed attempts', email });
-      }
-      
-      await user.save();
-      
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas.'
-      });
-    }
-    
-    user.loginAttempts = 0;
-    user.lockUntil = undefined;
-    user.lastLogin = Date.now();
-    await user.save();
-    
-    const token = generateToken(user._id);
-    
-    logger.info({ msg: 'User logged in', email });
-    
-    await AuditLog.create({
-      user: user._id,
-      action: 'login',
-      resource: 'User',
-      resourceId: user._id,
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
-    });
-    
-    res.json({
-      success: true,
-      message: 'Login efetuado com sucesso!',
-      data: {
-        token,
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isVerified: user.isVerified
-        }
-      }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Login error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao efetuar login. Tente novamente.'
-    });
-  }
-});
+    logger.info({ msg: 'Incident status updated', incidentId: incident._id, status, moderator: req.user.email });
 
-app.get('/api/auth/verify/:token', async (req, res) => {
-  try {
-    const user = await User.findOne({
-      verificationToken: req.params.token,
-      verificationTokenExpires: { $gt: Date.now() }
-    });
-    
-    if (!user) {
-      return res.status(400).json({
-        success: false,
-        message: 'Token inválido ou expirado.'
-      });
-    }
-    
-    user.isVerified = true;
-    user.verificationToken = undefined;
-    user.verificationTokenExpires = undefined;
-    await user.save();
-    
-    logger.info({ msg: 'Email verified', email: user.email });
-    
-    res.json({
-      success: true,
-      message: 'Email verificado com sucesso! Pode agora fazer login.'
-    });
-  } catch (error) {
-    logger.error({ msg: 'Email verification error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao verificar email.'
-    });
-  }
-});
-
-app.get('/api/auth/me', authenticate, async (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      user: req.user
-    }
-  });
-});
-
-// ============================================
-// 8. ROTAS DE INCIDÊNCIAS
-// ============================================
-
-app.post('/api/incidents', authenticate, incidentLimiter, validateIncident, auditLog('incident_create', 'Incident'), async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
-      });
-    }
-    
-    const { title, description, location, gps, photos } = req.body;
-    
-    const incident = await Incident.create({
-      title,
-      description,
-      location,
-      gps,
-      photos: photos || [],
-      user: req.user._id,
-      status: 'pending'
-    });
-    
-    logger.info({ msg: 'Incident created', user: req.user.email, incidentId: incident._id });
-    
-    res.status(201).json({
-      success: true,
-      message: 'Incidência reportada com sucesso!',
-      data: { incident }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Create incident error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao reportar incidência.'
-    });
-  }
-});
-
-app.get('/api/incidents/public', async (req, res) => {
-  try {
-    const { status } = req.query;
-    
-    const query = {};
-    if (status && ['pending', 'analyzing', 'inProgress', 'resolved'].includes(status)) {
-      query.status = status;
-    } else if (!status) {
-      query.status = { $in: ['pending', 'analyzing', 'inProgress', 'resolved'] };
-    }
-    
-    const incidents = await Incident.find(query)
-      .select('-user -moderatorNotes -__v')
-      .sort('-createdAt')
-      .limit(100);
-    
-    res.json({
-      success: true,
-      count: incidents.length,
-      data: { incidents }
-    });
-  } catch (error) {
-    logger.error({ msg: 'List incidents error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar incidências.'
-    });
-  }
-});
-
-app.get('/api/incidents/my', authenticate, async (req, res) => {
-  try {
-    const incidents = await Incident.find({ user: req.user._id })
-      .sort('-createdAt');
-    
-    res.json({
-      success: true,
-      count: incidents.length,
-      data: { incidents }
-    });
-  } catch (error) {
-    logger.error({ msg: 'List my incidents error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar incidências.'
-    });
-  }
-});
-
-app.get('/api/incidents/:id', async (req, res) => {
-  try {
-    const incident = await Incident.findById(req.params.id)
-      .select('-user -moderatorNotes -__v');
-    
-    if (!incident) {
-      return res.status(404).json({
-        success: false,
-        message: 'Incidência não encontrada.'
-      });
-    }
-    
-    res.json({
-      success: true,
-      data: { incident }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Get incident error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao carregar incidência.'
-    });
-  }
-});
-
-app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'admin'), auditLog('incident_update', 'Incident'), async (req, res) => {
-  try {
-    const { status, moderatorNotes } = req.body;
-    
-    if (!['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'].includes(status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Estado inválido.'
-      });
-    }
-    
-    const incident = await Incident.findById(req.params.id).populate('user', 'email name');
-    
-    if (!incident) {
-      return res.status(404).json({
-        success: false,
-        message: 'Incidência não encontrada.'
-      });
-    }
-    
-    incident.status = status;
-    if (moderatorNotes) incident.moderatorNotes = moderatorNotes;
-    if (status === 'resolved') incident.resolvedDate = Date.now();
-    
-    await incident.save();
-    
-    logger.info({ msg: 'Incident status updated', incidentId: incident._id, status, by: req.user.email });
-    
     res.json({
       success: true,
       message: 'Estado atualizado com sucesso!',
@@ -929,16 +614,16 @@ app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'adm
 app.delete('/api/incidents/:id', authenticate, authorize('admin'), auditLog('incident_delete', 'Incident'), async (req, res) => {
   try {
     const incident = await Incident.findByIdAndDelete(req.params.id);
-    
+
     if (!incident) {
       return res.status(404).json({
         success: false,
         message: 'Incidência não encontrada.'
       });
     }
-    
-    logger.info({ msg: 'Incident deleted', incidentId: incident._id, by: req.user.email });
-    
+
+    logger.info({ msg: 'Incident deleted', incidentId: incident._id, admin: req.user.email });
+
     res.json({
       success: true,
       message: 'Incidência eliminada com sucesso!'
@@ -953,16 +638,15 @@ app.delete('/api/incidents/:id', authenticate, authorize('admin'), auditLog('inc
 });
 
 // ============================================
-// 9. ROTAS DE NOTÍCIAS (corrigidas e completas)
+// 12. ROTAS DE NOTÍCIAS
 // ============================================
-
 app.get('/api/news', async (req, res) => {
   try {
     const news = await News.find({ published: true })
       .select('-author -__v')
       .sort('-publishDate')
       .limit(20);
-    
+
     res.json({
       success: true,
       count: news.length,
@@ -980,7 +664,7 @@ app.get('/api/news', async (req, res) => {
 app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('news_create', 'News'), async (req, res) => {
   try {
     const { title, excerpt, content, image, published } = req.body;
-    
+
     const news = await News.create({
       title,
       excerpt,
@@ -990,9 +674,9 @@ app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('n
       published: published || false,
       publishDate: published ? Date.now() : null
     });
-    
-    logger.info({ msg: 'News created', by: req.user.email, newsId: news._id });
-    
+
+    logger.info({ msg: 'News created', newsId: news._id, author: req.user.email });
+
     res.status(201).json({
       success: true,
       message: 'Notícia criada com sucesso!',
@@ -1010,32 +694,32 @@ app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('n
 app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog('news_update', 'News'), async (req, res) => {
   try {
     const { title, excerpt, content, image, published } = req.body;
-    
+
     const news = await News.findById(req.params.id);
-    
+
     if (!news) {
       return res.status(404).json({
         success: false,
         message: 'Notícia não encontrada.'
       });
     }
-    
+
     news.title = title || news.title;
     news.excerpt = excerpt || news.excerpt;
     news.content = content || news.content;
     news.image = image || news.image;
-    
+
     if (published !== undefined) {
       news.published = published;
       if (published && !news.publishDate) {
         news.publishDate = Date.now();
       }
     }
-    
+
     await news.save();
-    
-    logger.info({ msg: 'News updated', newsId: news._id, by: req.user.email });
-    
+
+    logger.info({ msg: 'News updated', newsId: news._id, moderator: req.user.email });
+
     res.json({
       success: true,
       message: 'Notícia atualizada com sucesso!',
@@ -1053,16 +737,16 @@ app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog
 app.delete('/api/news/:id', authenticate, authorize('admin'), auditLog('news_delete', 'News'), async (req, res) => {
   try {
     const news = await News.findByIdAndDelete(req.params.id);
-    
+
     if (!news) {
       return res.status(404).json({
         success: false,
         message: 'Notícia não encontrada.'
       });
     }
-    
-    logger.info({ msg: 'News deleted', newsId: news._id, by: req.user.email });
-    
+
+    logger.info({ msg: 'News deleted', newsId: news._id, admin: req.user.email });
+
     res.json({
       success: true,
       message: 'Notícia eliminada com sucesso!'
@@ -1077,15 +761,14 @@ app.delete('/api/news/:id', authenticate, authorize('admin'), auditLog('news_del
 });
 
 // ============================================
-// 10. ROTAS DE SLIDES
+// 13. ROTAS DE SLIDES
 // ============================================
-
 app.get('/api/slides', async (req, res) => {
   try {
     const slides = await Slide.find({ active: true })
       .sort('order')
       .select('-__v');
-    
+
     res.json({
       success: true,
       count: slides.length,
@@ -1103,16 +786,16 @@ app.get('/api/slides', async (req, res) => {
 app.post('/api/slides', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { title, image, order, active } = req.body;
-    
+
     const slide = await Slide.create({
       title,
       image,
       order: order || 0,
       active: active !== undefined ? active : true
     });
-    
-    logger.info({ msg: 'Slide created', by: req.user.email, slideId: slide._id });
-    
+
+    logger.info({ msg: 'Slide created', slideId: slide._id, admin: req.user.email });
+
     res.status(201).json({
       success: true,
       message: 'Slide criado com sucesso!',
@@ -1130,22 +813,22 @@ app.post('/api/slides', authenticate, authorize('admin'), async (req, res) => {
 app.put('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { title, image, order, active } = req.body;
-    
+
     const slide = await Slide.findByIdAndUpdate(
       req.params.id,
       { title, image, order, active },
       { new: true, runValidators: true }
     );
-    
+
     if (!slide) {
       return res.status(404).json({
         success: false,
         message: 'Slide não encontrado.'
       });
     }
-    
-    logger.info({ msg: 'Slide updated', slideId: slide._id, by: req.user.email });
-    
+
+    logger.info({ msg: 'Slide updated', slideId: slide._id, admin: req.user.email });
+
     res.json({
       success: true,
       message: 'Slide atualizado com sucesso!',
@@ -1163,16 +846,16 @@ app.put('/api/slides/:id', authenticate, authorize('admin'), async (req, res) =>
 app.delete('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
   try {
     const slide = await Slide.findByIdAndDelete(req.params.id);
-    
+
     if (!slide) {
       return res.status(404).json({
         success: false,
         message: 'Slide não encontrado.'
       });
     }
-    
-    logger.info({ msg: 'Slide deleted', slideId: slide._id, by: req.user.email });
-    
+
+    logger.info({ msg: 'Slide deleted', slideId: slide._id, admin: req.user.email });
+
     res.json({
       success: true,
       message: 'Slide eliminado com sucesso!'
@@ -1187,15 +870,14 @@ app.delete('/api/slides/:id', authenticate, authorize('admin'), async (req, res)
 });
 
 // ============================================
-// 11. ROTAS DE LINKS
+// 14. ROTAS DE LINKS
 // ============================================
-
 app.get('/api/links', async (req, res) => {
   try {
     const links = await Link.find({ active: true })
       .sort('order')
       .select('-__v');
-    
+
     res.json({
       success: true,
       count: links.length,
@@ -1213,16 +895,16 @@ app.get('/api/links', async (req, res) => {
 app.post('/api/links', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { title, url, order, active } = req.body;
-    
+
     const link = await Link.create({
       title,
       url,
       order: order || 0,
       active: active !== undefined ? active : true
     });
-    
-    logger.info({ msg: 'Link created', by: req.user.email, linkId: link._id });
-    
+
+    logger.info({ msg: 'Link created', linkId: link._id, admin: req.user.email });
+
     res.status(201).json({
       success: true,
       message: 'Link criado com sucesso!',
@@ -1240,22 +922,22 @@ app.post('/api/links', authenticate, authorize('admin'), async (req, res) => {
 app.put('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { title, url, order, active } = req.body;
-    
+
     const link = await Link.findByIdAndUpdate(
       req.params.id,
       { title, url, order, active },
       { new: true, runValidators: true }
     );
-    
+
     if (!link) {
       return res.status(404).json({
         success: false,
         message: 'Link não encontrado.'
       });
     }
-    
-    logger.info({ msg: 'Link updated', linkId: link._id, by: req.user.email });
-    
+
+    logger.info({ msg: 'Link updated', linkId: link._id, admin: req.user.email });
+
     res.json({
       success: true,
       message: 'Link atualizado com sucesso!',
@@ -1273,16 +955,16 @@ app.put('/api/links/:id', authenticate, authorize('admin'), async (req, res) => 
 app.delete('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
   try {
     const link = await Link.findByIdAndDelete(req.params.id);
-    
+
     if (!link) {
       return res.status(404).json({
         success: false,
         message: 'Link não encontrado.'
       });
     }
-    
-    logger.info({ msg: 'Link deleted', linkId: link._id, by: req.user.email });
-    
+
+    logger.info({ msg: 'Link deleted', linkId: link._id, admin: req.user.email });
+
     res.json({
       success: true,
       message: 'Link eliminado com sucesso!'
@@ -1297,15 +979,14 @@ app.delete('/api/links/:id', authenticate, authorize('admin'), async (req, res) 
 });
 
 // ============================================
-// 12. ROTAS DE ADMINISTRAÇÃO
+// 15. ROTAS DE ADMINISTRAÇÃO
 // ============================================
-
 app.get('/api/admin/users', authenticate, authorize('admin'), async (req, res) => {
   try {
     const users = await User.find()
       .select('-password -verificationToken -passwordResetToken')
       .sort('-createdAt');
-    
+
     res.json({
       success: true,
       count: users.length,
@@ -1323,29 +1004,29 @@ app.get('/api/admin/users', authenticate, authorize('admin'), async (req, res) =
 app.patch('/api/admin/users/:id/role', authenticate, authorize('admin'), auditLog('user_update', 'User'), async (req, res) => {
   try {
     const { role } = req.body;
-    
+
     if (!['user', 'moderator', 'admin'].includes(role)) {
       return res.status(400).json({
         success: false,
         message: 'Role inválida.'
       });
     }
-    
+
     const user = await User.findByIdAndUpdate(
       req.params.id,
       { role },
       { new: true }
     ).select('-password');
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
         message: 'Utilizador não encontrado.'
       });
     }
-    
-    logger.info({ msg: 'User role updated', user: user.email, role, by: req.user.email });
-    
+
+    logger.info({ msg: 'User role updated', userId: user.email, role, admin: req.user.email });
+
     res.json({
       success: true,
       message: 'Role atualizada com sucesso!',
@@ -1368,20 +1049,20 @@ app.delete('/api/admin/users/:id', authenticate, authorize('admin'), auditLog('u
         message: 'Não pode eliminar a sua própria conta.'
       });
     }
-    
+
     const user = await User.findByIdAndDelete(req.params.id);
-    
+
     if (!user) {
       return res.status(404).json({
         success: false,
         message: 'Utilizador não encontrado.'
       });
     }
-    
+
     await Incident.deleteMany({ user: user._id });
-    
-    logger.info({ msg: 'User deleted', user: user.email, by: req.user.email });
-    
+
+    logger.info({ msg: 'User deleted', userId: user.email, admin: req.user.email });
+
     res.json({
       success: true,
       message: 'Utilizador eliminado com sucesso!'
@@ -1416,7 +1097,7 @@ app.get('/api/admin/stats', authenticate, authorize('moderator', 'admin'), async
       News.countDocuments(),
       News.countDocuments({ published: true })
     ]);
-    
+
     res.json({
       success: true,
       data: {
@@ -1448,25 +1129,25 @@ app.get('/api/admin/stats', authenticate, authorize('moderator', 'admin'), async
 app.get('/api/admin/audit-logs', authenticate, authorize('admin'), async (req, res) => {
   try {
     const { page = 1, limit = 50, action, userId } = req.query;
-    
+
     const query = {};
     if (action) query.action = action;
     if (userId) query.user = userId;
-    
+
     const logs = await AuditLog.find(query)
       .populate('user', 'name email')
       .sort('-timestamp')
-      .limit(Number(limit))
-      .skip((Number(page) - 1) * Number(limit));
-    
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
     const count = await AuditLog.countDocuments(query);
-    
+
     res.json({
       success: true,
       data: {
         logs,
-        totalPages: Math.ceil(count / Number(limit)),
-        currentPage: Number(page)
+        totalPages: Math.ceil(count / limit),
+        currentPage: page
       }
     });
   } catch (error) {
@@ -1479,9 +1160,8 @@ app.get('/api/admin/audit-logs', authenticate, authorize('admin'), async (req, r
 });
 
 // ============================================
-// 13. TRATAMENTO DE ERROS
+// 16. TRATAMENTO DE ERROS
 // ============================================
-
 app.use('*', (req, res) => {
   res.status(404).json({
     success: false,
@@ -1492,10 +1172,10 @@ app.use('*', (req, res) => {
 app.use((err, req, res, next) => {
   logger.error({ msg: 'Server error', error: err });
   
-  const message = process.env.NODE_ENV === 'production' 
-    ? 'Erro interno do servidor.' 
+  const message = process.env.NODE_ENV === 'production'
+    ? 'Erro interno do servidor.'
     : err.message;
-  
+
   res.status(err.status || 500).json({
     success: false,
     message,
@@ -1504,36 +1184,19 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================
-// 14. LIGAÇÃO À BASE DE DADOS E SERVIDOR (FINAL, SEM HOTFIX)
+// 17. LIGAÇÃO À BASE DE DADOS E SERVIDOR
 // ============================================
-
-function clean(value) {
-  if (!value) return value;
-  return String(value).replace(/^['"]|['"]$/g, '').trim().replace(/\s+$/,'').replace(/\$$/, '');
-}
-
-// 1) validação dura da env
-const RAW_MONGO_URI = clean(process.env.MONGODB_URI);
-if (!RAW_MONGO_URI) {
-  console.error('❌ ERRO: Variável MONGODB_URI não definida no ambiente!');
-  process.exit(1);
-}
-
-// 2) log mascarado (sem password)
-const MASKED_URI = RAW_MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//<user>:<pass>@');
-console.log('ENV CHECK → NODE_ENV=', process.env.NODE_ENV || '(unset)');
-console.log('ENV CHECK → MONGODB_URI (masked)=', MASKED_URI);
-
-const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
-const MONGODB_URI = RAW_MONGO_URI;
+const PORT = process.env.PORT || 5000;
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/freguesia-portal';
 
 mongoose.set('strictQuery', false);
 
-mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
+mongoose.connect(MONGODB_URI)
   .then(() => {
-    logger.info({ msg: 'MongoDB conectado com sucesso', uri: MASKED_URI });
+    logger.info({ msg: 'MongoDB conectado com sucesso', uri: MONGODB_URI.replace(/:([^:@]{1,})@/, ':<user>:<pass>@') });
+    
     app.listen(PORT, () => {
-      logger.info({ msg: 'Servidor iniciado', mode: process.env.NODE_ENV || 'development', port: PORT });
+      logger.info({ msg: 'Servidor iniciado', port: PORT, mode: process.env.NODE_ENV || 'development' });
       console.log(`🚀 Servidor iniciado: http://localhost:${PORT}`);
       console.log(`📚 API disponível em: http://localhost:${PORT}/api`);
     });
@@ -1561,4 +1224,301 @@ process.on('SIGTERM', () => {
   });
 });
 
-module.exports = app;
+module.exports = app;: 'New user registered', email });
+
+    await AuditLog.create({
+      user: user._id,
+      action: 'register',
+      resource: 'User',
+      resourceId: user._id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Conta criada com sucesso! Verifique o seu email para ativar a conta.',
+      data: {
+        userId: user._id,
+        email: user.email
+      }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Registration error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao criar conta. Tente novamente.'
+    });
+  }
+});
+
+app.post('/api/auth/login', validateLogin, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { email, password } = req.body;
+
+    const user = await User.findOne({ email }).select('+password');
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Credenciais inválidas.'
+      });
+    }
+
+    if (user.isLocked()) {
+      return res.status(423).json({
+        success: false,
+        message: 'Conta temporariamente bloqueada devido a múltiplas tentativas falhadas.'
+      });
+    }
+
+    const isMatch = await user.comparePassword(password);
+
+    if (!isMatch) {
+      user.loginAttempts += 1;
+      if (user.loginAttempts >= 5) {
+        user.lockUntil = Date.now() + 30 * 60 * 1000;
+        logger.warn({ msg: 'Account locked due to failed attempts', email });
+      }
+      await user.save();
+
+      return res.status(401).json({
+        success: false,
+        message: 'Credenciais inválidas.'
+      });
+    }
+
+    user.loginAttempts = 0;
+    user.lockUntil = undefined;
+    user.lastLogin = Date.now();
+    await user.save();
+
+    const token = generateToken(user._id);
+
+    logger.info({ msg: 'User logged in', email });
+
+    await AuditLog.create({
+      user: user._id,
+      action: 'login',
+      resource: 'User',
+      resourceId: user._id,
+      ipAddress: req.ip,
+      userAgent: req.get('user-agent')
+    });
+
+    res.json({
+      success: true,
+      message: 'Login efetuado com sucesso!',
+      data: {
+        token,
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          isVerified: user.isVerified
+        }
+      }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Login error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao efetuar login. Tente novamente.'
+    });
+  }
+});
+
+app.get('/api/auth/verify/:token', async (req, res) => {
+  try {
+    const user = await User.findOne({
+      verificationToken: req.params.token,
+      verificationTokenExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        success: false,
+        message: 'Token inválido ou expirado.'
+      });
+    }
+
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    user.verificationTokenExpires = undefined;
+    await user.save();
+
+    logger.info({ msg: 'Email verified', email: user.email });
+
+    res.json({
+      success: true,
+      message: 'Email verificado com sucesso! Pode agora fazer login.'
+    });
+  } catch (error) {
+    logger.error({ msg: 'Email verification error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao verificar email.'
+    });
+  }
+});
+
+app.get('/api/auth/me', authenticate, async (req, res) => {
+  res.json({
+    success: true,
+    data: {
+      user: req.user
+    }
+  });
+});
+
+// ============================================
+// 11. ROTAS DE INCIDÊNCIAS
+// ============================================
+app.post('/api/incidents', authenticate, incidentLimiter, validateIncident, auditLog('incident_create', 'Incident'), async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { title, description, location, gps, photos } = req.body;
+
+    const incident = await Incident.create({
+      title,
+      description,
+      location,
+      gps,
+      photos: photos || [],
+      user: req.user._id,
+      status: 'pending'
+    });
+
+    logger.info({ msg: 'Incident created', userId: req.user.email, incidentId: incident._id });
+
+    res.status(201).json({
+      success: true,
+      message: 'Incidência reportada com sucesso!',
+      data: { incident }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Create incident error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao reportar incidência.'
+    });
+  }
+});
+
+app.get('/api/incidents/public', async (req, res) => {
+  try {
+    const { status } = req.query;
+    const query = {};
+
+    if (status && ['pending', 'analyzing', 'inProgress', 'resolved'].includes(status)) {
+      query.status = status;
+    } else if (!status) {
+      query.status = { $in: ['pending', 'analyzing', 'inProgress', 'resolved'] };
+    }
+
+    const incidents = await Incident.find(query)
+      .select('-user -moderatorNotes -__v')
+      .sort('-createdAt')
+      .limit(100);
+
+    res.json({
+      success: true,
+      count: incidents.length,
+      data: { incidents }
+    });
+  } catch (error) {
+    logger.error({ msg: 'List incidents error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar incidências.'
+    });
+  }
+});
+
+app.get('/api/incidents/my', authenticate, async (req, res) => {
+  try {
+    const incidents = await Incident.find({ user: req.user._id })
+      .sort('-createdAt');
+
+    res.json({
+      success: true,
+      count: incidents.length,
+      data: { incidents }
+    });
+  } catch (error) {
+    logger.error({ msg: 'List my incidents error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar incidências.'
+    });
+  }
+});
+
+app.get('/api/incidents/:id', async (req, res) => {
+  try {
+    const incident = await Incident.findById(req.params.id)
+      .select('-user -moderatorNotes -__v');
+
+    if (!incident) {
+      return res.status(404).json({
+        success: false,
+        message: 'Incidência não encontrada.'
+      });
+    }
+
+    res.json({
+      success: true,
+      data: { incident }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Get incident error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar incidência.'
+    });
+  }
+});
+
+app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'admin'), auditLog('incident_update', 'Incident'), async (req, res) => {
+  try {
+    const { status, moderatorNotes } = req.body;
+
+    if (!['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'].includes(status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Estado inválido.'
+      });
+    }
+
+    const incident = await Incident.findById(req.params.id).populate('user', 'email name');
+
+    if (!incident) {
+      return res.status(404).json({
+        success: false,
+        message: 'Incidência não encontrada.'
+      });
+    }
+
+    incident.status = status;
+    if (moderatorNotes) incident.moderatorNotes = moderatorNotes;
+    if (status === 'resolved') incident.resolvedDate = Date.now();
+
+    await incident.save();
+
+    logger.info({ msg
