@@ -1589,9 +1589,9 @@ process.on('uncaughtException', (err) => {
 
 process.on('SIGTERM', () => {
   logger.info({ msg: 'SIGTERM received. Shutting down gracefully...' });
-  mongoose.connection.close(() => {
-    logger.info({ msg: 'MongoDB connection closed.' });
-    process.exit(0);
+  mongoose.connection.close().then(() => {
+  logger.info({ msg: 'MongoDB connection closed.' });
+  process.exit(0);
   });
 });
 
