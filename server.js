@@ -103,6 +103,13 @@ const generalLimiter = rateLimit({
   message: 'Demasiados pedidos deste IP, tente novamente mais tarde.',
   standardHeaders: true,
   legacyHeaders: false,
+  handler: (req, res) => {
+    console.log('⚠️  RATE LIMIT ATINGIDO:', req.method, req.url, 'IP:', req.ip);
+    res.status(429).json({ 
+      success: false, 
+      message: 'Demasiados pedidos deste IP, tente novamente mais tarde.' 
+    });
+  }
 });
 
 const authLimiter = rateLimit({
@@ -110,6 +117,13 @@ const authLimiter = rateLimit({
   max: 5,
   message: 'Demasiadas tentativas de login. Conta temporariamente bloqueada.',
   skipSuccessfulRequests: true,
+  handler: (req, res) => {
+    console.log('⚠️  AUTH RATE LIMIT ATINGIDO:', req.method, req.url, 'IP:', req.ip);
+    res.status(429).json({ 
+      success: false, 
+      message: 'Demasiadas tentativas de login. Conta temporariamente bloqueada.' 
+    });
+  }
 });
 
 const incidentLimiter = rateLimit({
@@ -118,9 +132,33 @@ const incidentLimiter = rateLimit({
   message: 'Limite de incidências atingido. Tente novamente mais tarde.',
 });
 
+// Logging ANTES dos rate limiters
+app.use((req, res, next) => {
+  console.log(`🔓 BEFORE rate limiters: ${req.method} ${req.url}`);
+  next();
+});
+
 app.use('/api/', generalLimiter);
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+
+// Logging DEPOIS dos rate limiters
+app.use((req, res, next) => {
+  console.log(`✅ AFTER rate limiters: ${req.method} ${req.url}`);
+  next();
+});
+
+// ROTA DE HEALTH (sem rate limit)
+app.get('/api/health', (req, res) => {
+  console.log('✅ Health check accessed!');
+  res.json({ 
+    status: 'OK', 
+    timestamp: new Date().toISOString(),
+    message: 'API is running!'
+  });
+});
+
+console.log('✅ Health check route registered at /api/health');
 
 // ============================================
 // 3. LOGGING SEGURO
@@ -635,9 +673,17 @@ app.post('/api/auth/register', validateRegistration, async (req, res) => {
 });
 
 app.post('/api/auth/login', validateLogin, async (req, res) => {
+  console.log('🔐 LOGIN ROUTE HIT!', {
+    method: req.method,
+    url: req.url,
+    origin: req.headers.origin,
+    body: { email: req.body?.email, hasPassword: !!req.body?.password }
+  });
+  
   try {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', errors.array());
       return res.status(400).json({
         success: false,
         errors: errors.array()
@@ -645,6 +691,7 @@ app.post('/api/auth/login', validateLogin, async (req, res) => {
     }
     
     const { email, password } = req.body;
+    console.log(`🔍 Attempting login for: ${email}`);
     
     const user = await User.findOne({ email }).select('+password');
     
