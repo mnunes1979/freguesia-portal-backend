@@ -2,6 +2,9 @@
 // SERVER.JS - Backend Seguro Portal Freguesia
 // ============================================
 
+// ⚠️ CRITICAL: Load environment variables FIRST!
+require('dotenv').config();
+
 const express = require('express');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
@@ -19,6 +22,19 @@ const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
 
 const app = express();
+
+// ============================================
+// DEBUG: Verificar variáveis de ambiente críticas
+// ============================================
+console.log('============================================');
+console.log('🔍 VERIFICAÇÃO DE VARIÁVEIS DE AMBIENTE');
+console.log('============================================');
+console.log('NODE_ENV:', process.env.NODE_ENV || '(não definido)');
+console.log('PORT:', process.env.PORT || '(não definido)');
+console.log('MONGODB_URI:', process.env.MONGODB_URI ? '✅ Definido' : '❌ NÃO DEFINIDO');
+console.log('JWT_SECRET:', process.env.JWT_SECRET ? '✅ Definido' : '❌ NÃO DEFINIDO');
+console.log('ALLOWED_ORIGINS:', process.env.ALLOWED_ORIGINS || '(não definido - usando defaults)');
+console.log('============================================\n');
 
 // ============================================
 // 1. CONFIGURAÇÃO DE SEGURANÇA
