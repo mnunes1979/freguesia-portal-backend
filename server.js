@@ -1534,24 +1534,56 @@ mongoose.set('strictQuery', false);
 mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
   .then(() => {
     logger.info({ msg: 'MongoDB conectado com sucesso', uri: MASKED_URI });
+    console.log('✅ MongoDB connection successful!');
+    
     app.listen(PORT, () => {
       logger.info({ msg: 'Servidor iniciado', mode: process.env.NODE_ENV || 'development', port: PORT });
       console.log(`🚀 Servidor iniciado: http://localhost:${PORT}`);
       console.log(`📚 API disponível em: http://localhost:${PORT}/api`);
+      console.log('✅ Server is listening and ready to accept requests');
+      
+      // Verificação extra: o servidor está realmente funcional?
+      setTimeout(() => {
+        console.log('✅ Server has been running for 2 seconds without crashes!');
+      }, 2000);
     });
   })
   .catch((error) => {
+    console.error('❌ MongoDB connection failed!');
+    console.error('Error:', error);
     logger.error({ msg: 'Erro ao conectar ao MongoDB', error });
     process.exit(1);
   });
 
 process.on('unhandledRejection', (err) => {
-  logger.error({ msg: 'UNHANDLED REJECTION! Shutting down...', error: err });
+  console.error('❌ UNHANDLED REJECTION DETECTED!');
+  console.error('Error:', err);
+  console.error('Error name:', err?.name);
+  console.error('Error message:', err?.message);
+  console.error('Error stack:', err?.stack);
+  logger.error({ 
+    msg: 'UNHANDLED REJECTION! Shutting down...', 
+    error: err,
+    errorName: err?.name,
+    errorMessage: err?.message,
+    errorStack: err?.stack
+  });
   process.exit(1);
 });
 
 process.on('uncaughtException', (err) => {
-  logger.error({ msg: 'UNCAUGHT EXCEPTION! Shutting down...', error: err });
+  console.error('❌ UNCAUGHT EXCEPTION DETECTED!');
+  console.error('Error:', err);
+  console.error('Error name:', err?.name);
+  console.error('Error message:', err?.message);
+  console.error('Error stack:', err?.stack);
+  logger.error({ 
+    msg: 'UNCAUGHT EXCEPTION! Shutting down...', 
+    error: err,
+    errorName: err?.name,
+    errorMessage: err?.message,
+    errorStack: err?.stack
+  });
   process.exit(1);
 });
 
