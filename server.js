@@ -1,6 +1,10 @@
 // ============================================
 // SERVER.JS - Backend Seguro (CORRIGIDO)
+// Portal da Freguesia - Versão Corrigida
+// Data: 25/10/2025
+// Correções: CORS múltiplas origens + Trust Proxy
 // ============================================
+
 const express = require('express');
 const mongoose = require('mongoose');
 const helmet = require('helmet');
@@ -95,7 +99,6 @@ const generalLimiter = rateLimit({
   message: 'Demasiados pedidos deste IP, tente novamente mais tarde.',
   standardHeaders: true,
   legacyHeaders: false,
-  // CORRIGIDO: Usar IP real quando atrás de proxy
   trustProxy: true
 });
 
@@ -437,221 +440,6 @@ const authenticate = async (req, res, next) => {
     req.user = user;
     next();
     
-  } catch (error) {
-    logger.error({ msg: 'Authentication error', error });
-    return res.status(401).json({
-      success: false,
-      message: 'Token inválido ou expirado.'
-    });
-  }
-};
-
-const authorize = (...roles) => {
-  return (req, res, next) => {
-    if (!roles.includes(req.user.role)) {
-      return res.status(403).json({
-        success: false,
-        message: 'Não tem permissão para aceder a este recurso.'
-      });
-    }
-    next();
-  };
-};
-
-const auditLog = (action, resource) => {
-  return async (req, res, next) => {
-    try {
-      await AuditLog.create({
-        user: req.user ? req.user._id : null,
-        action,
-        resource,
-        resourceId: req.params.id || null,
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
-        details: {
-          body: req.body,
-          params: req.params
-        }
-      });
-    } catch (error) {
-      logger.error({ msg: 'Audit log error', error });
-    }
-    next();
-  };
-};
-
-// ============================================
-// 8. VALIDAÇÃO DE INPUTS
-// ============================================
-const validateRegistration = [
-  body('name')
-    .trim()
-    .notEmpty().withMessage('Nome é obrigatório')
-    .isLength({ min: 2, max: 100 }).withMessage('Nome deve ter entre 2 e 100 caracteres')
-    .matches(/^[a-zA-ZÀ-ÿ\s]+$/).withMessage('Nome deve conter apenas letras'),
-  body('email')
-    .trim()
-    .normalizeEmail()
-    .isEmail().withMessage('Email inválido')
-    .isLength({ max: 100 }).withMessage('Email muito longo'),
-  body('phone')
-    .optional()
-    .trim()
-    .matches(/^\+?[0-9\s-()]+$/).withMessage('Telefone inválido'),
-  body('password')
-    .isLength({ min: 8 }).withMessage('Password deve ter no mínimo 8 caracteres')
-    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
-    .withMessage('Password deve conter maiúsculas, minúsculas, números e símbolos'),
-  body('consentGiven')
-    .isBoolean()
-    .equals('true').withMessage('Deve aceitar os termos e condições')
-];
-
-const validateLogin = [
-  body('email')
-    .trim()
-    .normalizeEmail()
-    .isEmail().withMessage('Email inválido'),
-  body('password')
-    .notEmpty().withMessage('Password é obrigatória')
-];
-
-const validateIncident = [
-  body('title')
-    .trim()
-    .notEmpty().withMessage('Título é obrigatório')
-    .isLength({ min: 5, max: 200 }).withMessage('Título deve ter entre 5 e 200 caracteres'),
-  body('description')
-    .trim()
-    .notEmpty().withMessage('Descrição é obrigatória')
-    .isLength({ min: 10, max: 2000 }).withMessage('Descrição deve ter entre 10 e 2000 caracteres'),
-  body('location')
-    .trim()
-    .notEmpty().withMessage('Localização é obrigatória')
-    .isLength({ max: 300 }).withMessage('Localização muito longa'),
-  body('gps')
-    .optional()
-    .trim()
-    .matches(/^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/)
-    .withMessage('Coordenadas GPS inválidas')
-];
-
-// ============================================
-// 9. HEALTH CHECK ENDPOINTS
-// ============================================
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'API is running',
-    timestamp: new Date().toISOString()
-  });
-});
-
-app.get('/', (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: 'Portal Freguesia API - Running',
-    endpoints: {
-      health: '/health',
-      api: '/api',
-      docs: 'https://github.com/mnunes1979/freguesia-portal-backend'
-    }
-  });
-});
-
-// ============================================
-// 10. ROTAS DE AUTENTICAÇÃO
-// ============================================
-app.post('/api/auth/register', validateRegistration, async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
-      });
-    }
-
-    const { name, email, phone, password, consentGiven } = req.body;
-
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email já registado.'
-      });
-    }
-
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
-
-    const user = await User.create({
-      name,
-      email,
-      phone,
-      password,
-      consentGiven,
-      verificationToken,
-      verificationTokenExpires
-    });
-
-    logger.info({ msg: 'Incident status updated', incidentId: incident._id, status, moderator: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Estado atualizado com sucesso!',
-      data: { incident }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Update incident error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao atualizar incidência.'
-    });
-  }
-});
-
-app.delete('/api/incidents/:id', authenticate, authorize('admin'), auditLog('incident_delete', 'Incident'), async (req, res) => {
-  try {
-    const incident = await Incident.findByIdAndDelete(req.params.id);
-
-    if (!incident) {
-      return res.status(404).json({
-        success: false,
-        message: 'Incidência não encontrada.'
-      });
-    }
-
-    logger.info({ msg: 'Incident deleted', incidentId: incident._id, admin: req.user.email });
-
-    res.json({
-      success: true,
-      message: 'Incidência eliminada com sucesso!'
-    });
-  } catch (error) {
-    logger.error({ msg: 'Delete incident error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao eliminar incidência.'
-    });
-  }
-});
-
-// ============================================
-// 12. ROTAS DE NOTÍCIAS
-// ============================================
-app.get('/api/news', async (req, res) => {
-  try {
-    const news = await News.find({ published: true })
-      .select('-author -__v')
-      .sort('-publishDate')
-      .limit(20);
-
-    res.json({
-      success: true,
-      count: news.length,
-      data: { news }
-    });
   } catch (error) {
     logger.error({ msg: 'List news error', error });
     res.status(500).json({
@@ -1224,7 +1012,165 @@ process.on('SIGTERM', () => {
   });
 });
 
-module.exports = app;: 'New user registered', email });
+module.exports = app;
+    logger.error({ msg: 'Authentication error', error });
+    return res.status(401).json({
+      success: false,
+      message: 'Token inválido ou expirado.'
+    });
+  }
+};
+
+const authorize = (...roles) => {
+  return (req, res, next) => {
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Não tem permissão para aceder a este recurso.'
+      });
+    }
+    next();
+  };
+};
+
+const auditLog = (action, resource) => {
+  return async (req, res, next) => {
+    try {
+      await AuditLog.create({
+        user: req.user ? req.user._id : null,
+        action,
+        resource,
+        resourceId: req.params.id || null,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+        details: {
+          body: req.body,
+          params: req.params
+        }
+      });
+    } catch (error) {
+      logger.error({ msg: 'Audit log error', error });
+    }
+    next();
+  };
+};
+
+// ============================================
+// 8. VALIDAÇÃO DE INPUTS
+// ============================================
+const validateRegistration = [
+  body('name')
+    .trim()
+    .notEmpty().withMessage('Nome é obrigatório')
+    .isLength({ min: 2, max: 100 }).withMessage('Nome deve ter entre 2 e 100 caracteres')
+    .matches(/^[a-zA-ZÀ-ÿ\s]+$/).withMessage('Nome deve conter apenas letras'),
+  body('email')
+    .trim()
+    .normalizeEmail()
+    .isEmail().withMessage('Email inválido')
+    .isLength({ max: 100 }).withMessage('Email muito longo'),
+  body('phone')
+    .optional()
+    .trim()
+    .matches(/^\+?[0-9\s-()]+$/).withMessage('Telefone inválido'),
+  body('password')
+    .isLength({ min: 8 }).withMessage('Password deve ter no mínimo 8 caracteres')
+    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
+    .withMessage('Password deve conter maiúsculas, minúsculas, números e símbolos'),
+  body('consentGiven')
+    .isBoolean()
+    .equals('true').withMessage('Deve aceitar os termos e condições')
+];
+
+const validateLogin = [
+  body('email')
+    .trim()
+    .normalizeEmail()
+    .isEmail().withMessage('Email inválido'),
+  body('password')
+    .notEmpty().withMessage('Password é obrigatória')
+];
+
+const validateIncident = [
+  body('title')
+    .trim()
+    .notEmpty().withMessage('Título é obrigatório')
+    .isLength({ min: 5, max: 200 }).withMessage('Título deve ter entre 5 e 200 caracteres'),
+  body('description')
+    .trim()
+    .notEmpty().withMessage('Descrição é obrigatória')
+    .isLength({ min: 10, max: 2000 }).withMessage('Descrição deve ter entre 10 e 2000 caracteres'),
+  body('location')
+    .trim()
+    .notEmpty().withMessage('Localização é obrigatória')
+    .isLength({ max: 300 }).withMessage('Localização muito longa'),
+  body('gps')
+    .optional()
+    .trim()
+    .matches(/^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/)
+    .withMessage('Coordenadas GPS inválidas')
+];
+
+// ============================================
+// 9. HEALTH CHECK ENDPOINTS
+// ============================================
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'API is running',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Portal Freguesia API - Running',
+    endpoints: {
+      health: '/health',
+      api: '/api',
+      docs: 'https://github.com/mnunes1979/freguesia-portal-backend'
+    }
+  });
+});
+
+// ============================================
+// 10. ROTAS DE AUTENTICAÇÃO
+// ============================================
+app.post('/api/auth/register', validateRegistration, async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { name, email, phone, password, consentGiven } = req.body;
+
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'Email já registado.'
+      });
+    }
+
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
+
+    const user = await User.create({
+      name,
+      email,
+      phone,
+      password,
+      consentGiven,
+      verificationToken,
+      verificationTokenExpires
+    });
+
+    logger.info({ msg: 'New user registered', email });
 
     await AuditLog.create({
       user: user._id,
@@ -1521,4 +1467,654 @@ app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'adm
 
     await incident.save();
 
-    logger.info({ msg
+    logger.info({ msg: 'Incident status updated', incidentId: incident._id, status, moderator: req.user.email });
+
+    res.json({
+      success: true,
+      message: 'Estado atualizado com sucesso!',
+      data: { incident }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Update incident error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao atualizar incidência.'
+    });
+  }
+});
+
+app.delete('/api/incidents/:id', authenticate, authorize('admin'), auditLog('incident_delete', 'Incident'), async (req, res) => {
+  try {
+    const incident = await Incident.findByIdAndDelete(req.params.id);
+
+    if (!incident) {
+      return res.status(404).json({
+        success: false,
+        message: 'Incidência não encontrada.'
+      });
+    }
+
+    logger.info({ msg: 'Incident deleted', incidentId: incident._id, admin: req.user.email });
+
+    res.json({
+      success: true,
+      message: 'Incidência eliminada com sucesso!'
+    });
+  } catch (error) {
+    logger.error({ msg: 'Delete incident error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao eliminar incidência.'
+    });
+  }
+});
+
+// ============================================
+// 12. ROTAS DE NOTÍCIAS
+// ============================================
+app.get('/api/news', async (req, res) => {
+  try {
+    const news = await News.find({ published: true })
+      .select('-author -__v')
+      .sort('-publishDate')
+      .limit(20);
+    
+    res.json({
+      success: true,
+      count: news.length,
+      data: { news }
+    });
+  } catch (error) {
+    logger.error({ msg: 'List news error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar notícias.'
+    });
+  }
+});
+
+app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('news_create', 'News'), async (req, res) => {
+  try {
+    const { title, excerpt, content, image, published } = req.body;
+    
+    const news = await News.create({
+      title,
+      excerpt,
+      content,
+      image,
+      author: req.user._id,
+      published: published || false,
+      publishDate: published ? Date.now() : null
+    });
+    
+    logger.info({ msg: 'News created', by: req.user.email, newsId: news._id });
+    
+    res.status(201).json({
+      success: true,
+      message: 'Notícia criada com sucesso!',
+      data: { news }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Create news error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao criar notícia.'
+    });
+  }
+});
+
+app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog('news_update', 'News'), async (req, res) => {
+  try {
+    const { title, excerpt, content, image, published } = req.body;
+    
+    const news = await News.findById(req.params.id);
+    
+    if (!news) {
+      return res.status(404).json({
+        success: false,
+        message: 'Notícia não encontrada.'
+      });
+    }
+    
+    news.title = title || news.title;
+    news.excerpt = excerpt || news.excerpt;
+    news.content = content || news.content;
+    news.image = image || news.image;
+    
+    if (published !== undefined) {
+      news.published = published;
+      if (published && !news.publishDate) {
+        news.publishDate = Date.now();
+      }
+    }
+    
+    await news.save();
+    
+    logger.info({ msg: 'News updated', newsId: news._id, by: req.user.email });
+    
+    res.json({
+      success: true,
+      message: 'Notícia atualizada com sucesso!',
+      data: { news }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Update news error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao atualizar notícia.'
+    });
+  }
+});
+
+app.delete('/api/news/:id', authenticate, authorize('admin'), auditLog('news_delete', 'News'), async (req, res) => {
+  try {
+    const news = await News.findByIdAndDelete(req.params.id);
+    
+    if (!news) {
+      return res.status(404).json({
+        success: false,
+        message: 'Notícia não encontrada.'
+      });
+    }
+    
+    logger.info({ msg: 'News deleted', newsId: news._id, by: req.user.email });
+    
+    res.json({
+      success: true,
+      message: 'Notícia eliminada com sucesso!'
+    });
+  } catch (error) {
+    logger.error({ msg: 'Delete news error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao eliminar notícia.'
+    });
+  }
+});
+
+// ============================================
+// 10. ROTAS DE SLIDES
+// ============================================
+
+app.get('/api/slides', async (req, res) => {
+  try {
+    const slides = await Slide.find({ active: true })
+      .sort('order')
+      .select('-__v');
+    
+    res.json({
+      success: true,
+      count: slides.length,
+      data: { slides }
+    });
+  } catch (error) {
+    logger.error({ msg: 'List slides error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar slides.'
+    });
+  }
+});
+
+app.post('/api/slides', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { title, image, order, active } = req.body;
+    
+    const slide = await Slide.create({
+      title,
+      image,
+      order: order || 0,
+      active: active !== undefined ? active : true
+    });
+    
+    logger.info({ msg: 'Slide created', by: req.user.email, slideId: slide._id });
+    
+    res.status(201).json({
+      success: true,
+      message: 'Slide criado com sucesso!',
+      data: { slide }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Create slide error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao criar slide.'
+    });
+  }
+});
+
+app.put('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { title, image, order, active } = req.body;
+    
+    const slide = await Slide.findByIdAndUpdate(
+      req.params.id,
+      { title, image, order, active },
+      { new: true, runValidators: true }
+    );
+    
+    if (!slide) {
+      return res.status(404).json({
+        success: false,
+        message: 'Slide não encontrado.'
+      });
+    }
+    
+    logger.info({ msg: 'Slide updated', slideId: slide._id, by: req.user.email });
+    
+    res.json({
+      success: true,
+      message: 'Slide atualizado com sucesso!',
+      data: { slide }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Update slide error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao atualizar slide.'
+    });
+  }
+});
+
+app.delete('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const slide = await Slide.findByIdAndDelete(req.params.id);
+    
+    if (!slide) {
+      return res.status(404).json({
+        success: false,
+        message: 'Slide não encontrado.'
+      });
+    }
+    
+    logger.info({ msg: 'Slide deleted', slideId: slide._id, by: req.user.email });
+    
+    res.json({
+      success: true,
+      message: 'Slide eliminado com sucesso!'
+    });
+  } catch (error) {
+    logger.error({ msg: 'Delete slide error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao eliminar slide.'
+    });
+  }
+});
+
+// ============================================
+// 11. ROTAS DE LINKS
+// ============================================
+
+app.get('/api/links', async (req, res) => {
+  try {
+    const links = await Link.find({ active: true })
+      .sort('order')
+      .select('-__v');
+    
+    res.json({
+      success: true,
+      count: links.length,
+      data: { links }
+    });
+  } catch (error) {
+    logger.error({ msg: 'List links error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar links.'
+    });
+  }
+});
+
+app.post('/api/links', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { title, url, order, active } = req.body;
+    
+    const link = await Link.create({
+      title,
+      url,
+      order: order || 0,
+      active: active !== undefined ? active : true
+    });
+    
+    logger.info({ msg: 'Link created', by: req.user.email, linkId: link._id });
+    
+    res.status(201).json({
+      success: true,
+      message: 'Link criado com sucesso!',
+      data: { link }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Create link error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao criar link.'
+    });
+  }
+});
+
+app.put('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { title, url, order, active } = req.body;
+    
+    const link = await Link.findByIdAndUpdate(
+      req.params.id,
+      { title, url, order, active },
+      { new: true, runValidators: true }
+    );
+    
+    if (!link) {
+      return res.status(404).json({
+        success: false,
+        message: 'Link não encontrado.'
+      });
+    }
+    
+    logger.info({ msg: 'Link updated', linkId: link._id, by: req.user.email });
+    
+    res.json({
+      success: true,
+      message: 'Link atualizado com sucesso!',
+      data: { link }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Update link error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao atualizar link.'
+    });
+  }
+});
+
+app.delete('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const link = await Link.findByIdAndDelete(req.params.id);
+    
+    if (!link) {
+      return res.status(404).json({
+        success: false,
+        message: 'Link não encontrado.'
+      });
+    }
+    
+    logger.info({ msg: 'Link deleted', linkId: link._id, by: req.user.email });
+    
+    res.json({
+      success: true,
+      message: 'Link eliminado com sucesso!'
+    });
+  } catch (error) {
+    logger.error({ msg: 'Delete link error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao eliminar link.'
+    });
+  }
+});
+
+// ============================================
+// 12. ROTAS DE ADMINISTRAÇÃO
+// ============================================
+
+app.get('/api/admin/users', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const users = await User.find()
+      .select('-password -verificationToken -passwordResetToken')
+      .sort('-createdAt');
+    
+    res.json({
+      success: true,
+      count: users.length,
+      data: { users }
+    });
+  } catch (error) {
+    logger.error({ msg: 'List users error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar utilizadores.'
+    });
+  }
+});
+
+app.patch('/api/admin/users/:id/role', authenticate, authorize('admin'), auditLog('user_update', 'User'), async (req, res) => {
+  try {
+    const { role } = req.body;
+    
+    if (!['user', 'moderator', 'admin'].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Role inválida.'
+      });
+    }
+    
+    const user = await User.findByIdAndUpdate(
+      req.params.id,
+      { role },
+      { new: true }
+    ).select('-password');
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilizador não encontrado.'
+      });
+    }
+    
+    logger.info({ msg: 'User role updated', user: user.email, role, by: req.user.email });
+    
+    res.json({
+      success: true,
+      message: 'Role atualizada com sucesso!',
+      data: { user }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Update user role error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao atualizar role.'
+    });
+  }
+});
+
+app.delete('/api/admin/users/:id', authenticate, authorize('admin'), auditLog('user_delete', 'User'), async (req, res) => {
+  try {
+    if (req.params.id === req.user._id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Não pode eliminar a sua própria conta.'
+      });
+    }
+    
+    const user = await User.findByIdAndDelete(req.params.id);
+    
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'Utilizador não encontrado.'
+      });
+    }
+    
+    await Incident.deleteMany({ user: user._id });
+    
+    logger.info({ msg: 'User deleted', user: user.email, by: req.user.email });
+    
+    res.json({
+      success: true,
+      message: 'Utilizador eliminado com sucesso!'
+    });
+  } catch (error) {
+    logger.error({ msg: 'Delete user error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao eliminar utilizador.'
+    });
+  }
+});
+
+app.get('/api/admin/stats', authenticate, authorize('moderator', 'admin'), async (req, res) => {
+  try {
+    const [
+      totalUsers,
+      totalIncidents,
+      pendingIncidents,
+      analyzingIncidents,
+      inProgressIncidents,
+      resolvedIncidents,
+      totalNews,
+      publishedNews
+    ] = await Promise.all([
+      User.countDocuments(),
+      Incident.countDocuments(),
+      Incident.countDocuments({ status: 'pending' }),
+      Incident.countDocuments({ status: 'analyzing' }),
+      Incident.countDocuments({ status: 'inProgress' }),
+      Incident.countDocuments({ status: 'resolved' }),
+      News.countDocuments(),
+      News.countDocuments({ published: true })
+    ]);
+    
+    res.json({
+      success: true,
+      data: {
+        users: {
+          total: totalUsers
+        },
+        incidents: {
+          total: totalIncidents,
+          pending: pendingIncidents,
+          analyzing: analyzingIncidents,
+          inProgress: inProgressIncidents,
+          resolved: resolvedIncidents
+        },
+        news: {
+          total: totalNews,
+          published: publishedNews
+        }
+      }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Get stats error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar estatísticas.'
+    });
+  }
+});
+
+app.get('/api/admin/audit-logs', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const { page = 1, limit = 50, action, userId } = req.query;
+    
+    const query = {};
+    if (action) query.action = action;
+    if (userId) query.user = userId;
+    
+    const logs = await AuditLog.find(query)
+      .populate('user', 'name email')
+      .sort('-timestamp')
+      .limit(Number(limit))
+      .skip((Number(page) - 1) * Number(limit));
+    
+    const count = await AuditLog.countDocuments(query);
+    
+    res.json({
+      success: true,
+      data: {
+        logs,
+        totalPages: Math.ceil(count / Number(limit)),
+        currentPage: Number(page)
+      }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Get audit logs error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar logs.'
+    });
+  }
+});
+
+// ============================================
+// 13. TRATAMENTO DE ERROS
+// ============================================
+
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Rota não encontrada.'
+  });
+});
+
+app.use((err, req, res, next) => {
+  logger.error({ msg: 'Server error', error: err });
+  
+  const message = process.env.NODE_ENV === 'production' 
+    ? 'Erro interno do servidor.' 
+    : err.message;
+  
+  res.status(err.status || 500).json({
+    success: false,
+    message,
+    ...(process.env.NODE_ENV !== 'production' && { stack: err.stack })
+  });
+});
+
+// ============================================
+// 14. LIGAÇÃO À BASE DE DADOS E SERVIDOR (FINAL, SEM HOTFIX)
+// ============================================
+
+function clean(value) {
+  if (!value) return value;
+  return String(value).replace(/^['"]|['"]$/g, '').trim().replace(/\s+$/,'').replace(/\$$/, '');
+}
+
+// 1) validação dura da env
+const RAW_MONGO_URI = clean(process.env.MONGODB_URI);
+if (!RAW_MONGO_URI) {
+  console.error('❌ ERRO: Variável MONGODB_URI não definida no ambiente!');
+  process.exit(1);
+}
+
+// 2) log mascarado (sem password)
+const MASKED_URI = RAW_MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//<user>:<pass>@');
+console.log('ENV CHECK → NODE_ENV=', process.env.NODE_ENV || '(unset)');
+console.log('ENV CHECK → MONGODB_URI (masked)=', MASKED_URI);
+
+const PORT = process.env.PORT ? Number(process.env.PORT) : 5000;
+const MONGODB_URI = RAW_MONGO_URI;
+
+mongoose.set('strictQuery', false);
+
+mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
+  .then(() => {
+    logger.info({ msg: 'MongoDB conectado com sucesso', uri: MASKED_URI });
+    app.listen(PORT, () => {
+      logger.info({ msg: 'Servidor iniciado', mode: process.env.NODE_ENV || 'development', port: PORT });
+      console.log(`🚀 Servidor iniciado: http://localhost:${PORT}`);
+      console.log(`📚 API disponível em: http://localhost:${PORT}/api`);
+    });
+  })
+  .catch((error) => {
+    logger.error({ msg: 'Erro ao conectar ao MongoDB', error });
+    process.exit(1);
+  });
+
+process.on('unhandledRejection', (err) => {
+  logger.error({ msg: 'UNHANDLED REJECTION! Shutting down...', error: err });
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error({ msg: 'UNCAUGHT EXCEPTION! Shutting down...', error: err });
+  process.exit(1);
+});
+
+process.on('SIGTERM', () => {
+  logger.info({ msg: 'SIGTERM received. Shutting down gracefully...' });
+  mongoose.connection.close(() => {
+    logger.info({ msg: 'MongoDB connection closed.' });
+    process.exit(0);
+  });
+});
+
+module.exports = app;
