@@ -2,7 +2,7 @@
 // SERVER.JS - Backend Seguro Portal Freguesia
 // ============================================
 
-// ⚠️ CRITICAL: Load environment variables FIRST! 
+// ⚠️ CRITICAL: Load environment variables FIRST!
 require('dotenv').config();
 
 const express = require('express');
