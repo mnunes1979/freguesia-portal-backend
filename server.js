@@ -56,41 +56,35 @@ app.use(helmet({
   }
 }));
 
-// Configuração de CORS para múltiplas origens
-const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:5173'
-    ];
-
-console.log('🔐 CORS - Origens permitidas:', allowedOrigins);
+// ⚠️ TEMPORÁRIO: CORS ABERTO PARA DEBUG
+console.log('⚠️  ATENÇÃO: CORS configurado para aceitar TODAS as origens (DEBUG MODE)');
 
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Permitir requisições sem origin (Postman, curl, etc)
-    if (!origin) {
-      return callback(null, true);
-    }
-    
-    // Verificar se a origem está permitida
-    if (allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.includes('*')) {
-      callback(null, true);
-    } else {
-      console.log('❌ CORS bloqueou origem:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: '*', // TEMPORÁRIO: aceitar todas as origens
   credentials: true,
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 86400 // 24 horas
+  maxAge: 86400
 };
+
+// Middleware de logging para TODOS os pedidos
+app.use((req, res, next) => {
+  console.log(`📥 ${req.method} ${req.url} - Origin: ${req.headers.origin || 'N/A'}`);
+  next();
+});
+
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); // trata preflight OPTIONS
+
+// Log adicional para OPTIONS
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    console.log('✅ OPTIONS request received and processed');
+  }
+  next();
+});
 
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
