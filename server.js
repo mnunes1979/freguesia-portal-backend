@@ -40,15 +40,30 @@ app.use(helmet({
   }
 }));
 
-// Configuração de CORS para múltiplas origens
+// CORS configurado para múltiplas origens
 const allowedOrigins = process.env.ALLOWED_ORIGINS 
-  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
-  : [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://localhost:5173'
-    ];
+  ? process.env.ALLOWED_ORIGINS.split(',')
+  : ['http://localhost:3000'];
 
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Permite requests sem origem (mobile apps, curl, Postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS bloqueado para origem:', origin);
+      callback(new Error('Não permitido por CORS'));
+    }
+  },
+  credentials: true,
+  optionsSuccessStatus: 200,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+};
+
+// Log das origens permitidas (útil para debug)
 console.log('🔐 CORS - Origens permitidas:', allowedOrigins);
 
 const corsOptions = {
