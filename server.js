@@ -55,23 +55,7 @@ console.log('🔐 CORS - Origens permitidas:', allowedOrigins);
 
 // Configuração CORS corrigida
 const corsOptions = {
-  origin: function (origin, callback) {
-    console.log('🔍 CORS check - Origin recebida:', origin);
-    
-    // Permitir requests sem origin (ex: mobile apps, Postman, testes locais)
-    if (!origin || origin === 'null') {
-      console.log('✅ CORS: Permitindo origem null/undefined (teste local)');
-      return callback(null, true);
-    }
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      console.log('✅ CORS: Origem permitida!');
-      callback(null, true);
-    } else {
-      console.log('❌ CORS bloqueou origem:', origin);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: allowedOrigins,
   credentials: false, // ✅ REMOVIDO! Não usamos cookies, só tokens em localStorage
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
