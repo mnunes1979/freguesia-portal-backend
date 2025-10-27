@@ -37,46 +37,54 @@ console.log('ALLOWED_ORIGINS:', process.env.ALLOWED_ORIGINS || '(não definido -
 console.log('============================================\n');
 
 // ============================================
-// 1. CONFIGURAÇÃO DE SEGURANÇA
+// 1. CONFIGURAÇÃO DE CORS (ANTES DE TUDO!)
 // ============================================
 
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      scriptSrc: ["'self'"],
-      imgSrc: ["'self'", "data:", "https:"],
-    },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  }
-}));
+// Lista de origens permitidas
+const allowedOrigins = process.env.ALLOWED_ORIGINS 
+  ? process.env.ALLOWED_ORIGINS.split(',').map(origin => origin.trim())
+  : [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'http://localhost:5173',
+      'https://portal-freguesias-freguesia-frontend.3isjct.easypanel.host',
+      'https://portal-freguesias-freguesia-backoffice.3isjct.easypanel.host'
+    ];
 
-// ⚠️ TEMPORÁRIO: CORS ABERTO PARA DEBUG
-console.log('⚠️  ATENÇÃO: CORS configurado para aceitar TODAS as origens (DEBUG MODE)');
+console.log('🔐 CORS - Origens permitidas:', allowedOrigins);
 
+// Configuração CORS corrigida
 const corsOptions = {
-  origin: '*', // TEMPORÁRIO: aceitar todas as origens
-  credentials: true,
+  origin: function (origin, callback) {
+    // Permitir requests sem origin (ex: mobile apps, Postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('❌ CORS bloqueou origem:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: false, // ✅ REMOVIDO! Não usamos cookies, só tokens em localStorage
   optionsSuccessStatus: 200,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 86400
+  maxAge: 86400 // 24 horas de cache para preflight
 };
+
+// ✅ CORS VEM PRIMEIRO! (antes de helmet e de tudo)
+app.use(cors(corsOptions));
+
+// ✅ Handler OPTIONS super agressivo (responde IMEDIATAMENTE)
+app.options('*', cors(corsOptions));
 
 // Middleware de logging para TODOS os pedidos
 app.use((req, res, next) => {
   console.log(`📥 ${req.method} ${req.url} - Origin: ${req.headers.origin || 'N/A'}`);
   next();
 });
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // trata preflight OPTIONS
 
 // Log adicional para OPTIONS
 app.use((req, res, next) => {
@@ -86,6 +94,28 @@ app.use((req, res, next) => {
   next();
 });
 
+// ============================================
+// 2. SEGURANÇA (DEPOIS DO CORS!)
+// ============================================
+
+// ✅ Helmet VEM DEPOIS DO CORS (para não sobrescrever headers)
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+    },
+  },
+  crossOriginResourcePolicy: { policy: "cross-origin" }, // ✅ IMPORTANTE: permitir cross-origin
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  }
+}));
+
 app.use(express.json({ limit: '10kb' }));
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 app.use(mongoSanitize());
@@ -94,7 +124,7 @@ app.use(hpp());
 app.use(compression());
 
 // ============================================
-// 2. RATE LIMITING
+// 3. RATE LIMITING
 // ============================================
 
 const generalLimiter = rateLimit({
@@ -161,7 +191,7 @@ app.get('/api/health', (req, res) => {
 console.log('✅ Health check route registered at /api/health');
 
 // ============================================
-// 3. LOGGING SEGURO
+// 4. LOGGING SEGURO
 // ============================================
 
 const logger = winston.createLogger({
@@ -180,7 +210,7 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // ============================================
-// 4. MODELOS DE DADOS
+// 5. MODELOS DE DADOS
 // ============================================
 
 const userSchema = new mongoose.Schema({
@@ -286,20 +316,38 @@ const incidentSchema = new mongoose.Schema({
     enum: ['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'],
     default: 'pending'
   },
-  photos: [{
+  priority: {
     type: String,
-    maxlength: [500, 'URL da foto muito longo']
-  }],
+    enum: ['low', 'medium', 'high', 'urgent'],
+    default: 'medium'
+  },
+  category: {
+    type: String,
+    enum: ['infrastructure', 'safety', 'environment', 'health', 'other'],
+    default: 'other'
+  },
   user: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
     required: true
   },
-  moderatorNotes: {
-    type: String,
-    maxlength: [1000, 'Notas muito longas']
+  assignedTo: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User'
   },
-  resolvedDate: Date,
+  notes: [{
+    text: String,
+    addedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    addedAt: {
+      type: Date,
+      default: Date.now
+    }
+  }],
+  images: [String],
+  resolvedAt: Date,
   createdAt: {
     type: Date,
     default: Date.now
@@ -307,9 +355,6 @@ const incidentSchema = new mongoose.Schema({
 }, {
   timestamps: true
 });
-
-incidentSchema.index({ status: 1, createdAt: -1 });
-incidentSchema.index({ user: 1 });
 
 const Incident = mongoose.model('Incident', incidentSchema);
 
@@ -320,21 +365,17 @@ const newsSchema = new mongoose.Schema({
     trim: true,
     maxlength: [200, 'Título muito longo']
   },
-  excerpt: {
-    type: String,
-    required: [true, 'Resumo é obrigatório'],
-    trim: true,
-    maxlength: [500, 'Resumo muito longo']
-  },
   content: {
     type: String,
     required: [true, 'Conteúdo é obrigatório'],
-    maxlength: [10000, 'Conteúdo muito longo']
+    trim: true
   },
-  image: {
+  excerpt: {
     type: String,
-    required: [true, 'Imagem é obrigatória']
+    trim: true,
+    maxlength: [300, 'Resumo muito longo']
   },
+  image: String,
   author: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -344,7 +385,21 @@ const newsSchema = new mongoose.Schema({
     type: Boolean,
     default: false
   },
-  publishDate: Date
+  publishedAt: Date,
+  views: {
+    type: Number,
+    default: 0
+  },
+  category: {
+    type: String,
+    enum: ['event', 'announcement', 'notice', 'general'],
+    default: 'general'
+  },
+  tags: [String],
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
 }, {
   timestamps: true
 });
@@ -358,9 +413,18 @@ const slideSchema = new mongoose.Schema({
     trim: true,
     maxlength: [100, 'Título muito longo']
   },
+  description: {
+    type: String,
+    trim: true,
+    maxlength: [300, 'Descrição muito longa']
+  },
   image: {
     type: String,
     required: [true, 'Imagem é obrigatória']
+  },
+  link: {
+    type: String,
+    trim: true
   },
   order: {
     type: Number,
@@ -369,6 +433,10 @@ const slideSchema = new mongoose.Schema({
   active: {
     type: Boolean,
     default: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true
@@ -386,8 +454,16 @@ const linkSchema = new mongoose.Schema({
   url: {
     type: String,
     required: [true, 'URL é obrigatória'],
-    trim: true,
-    match: [/^https?:\/\/.+/, 'URL inválida']
+    trim: true
+  },
+  icon: {
+    type: String,
+    trim: true
+  },
+  category: {
+    type: String,
+    enum: ['service', 'external', 'internal', 'document'],
+    default: 'external'
   },
   order: {
     type: Number,
@@ -396,6 +472,10 @@ const linkSchema = new mongoose.Schema({
   active: {
     type: Boolean,
     default: true
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
   }
 }, {
   timestamps: true
@@ -403,65 +483,50 @@ const linkSchema = new mongoose.Schema({
 
 const Link = mongoose.model('Link', linkSchema);
 
-const auditSchema = new mongoose.Schema({
-  user: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  },
+const auditLogSchema = new mongoose.Schema({
   action: {
     type: String,
-    required: true,
-    enum: ['login', 'logout', 'register', 'password_change', 'incident_create', 
-           'incident_update', 'incident_delete', 'user_update', 'user_delete', 
-           'news_create', 'news_update', 'news_delete']
+    required: true
   },
   resource: {
     type: String,
     required: true
   },
   resourceId: mongoose.Schema.Types.ObjectId,
+  user: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
   ipAddress: String,
   userAgent: String,
-  details: mongoose.Schema.Types.Mixed,
   timestamp: {
     type: Date,
     default: Date.now
-  }
+  },
+  details: mongoose.Schema.Types.Mixed
 });
 
-auditSchema.index({ user: 1, timestamp: -1 });
-auditSchema.index({ action: 1, timestamp: -1 });
-
-const AuditLog = mongoose.model('AuditLog', auditSchema);
+const AuditLog = mongoose.model('AuditLog', auditLogSchema);
 
 // ============================================
-// 5. MIDDLEWARES DE AUTENTICAÇÃO
+// 6. MIDDLEWARE DE AUTENTICAÇÃO
 // ============================================
-
-const generateToken = (userId) => {
-  return jwt.sign(
-    { id: userId },
-    process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production',
-    { expiresIn: process.env.JWT_EXPIRES_IN || '24h' }
-  );
-};
 
 const authenticate = async (req, res, next) => {
   try {
-    let token;
+    const authHeader = req.headers.authorization;
     
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
-    }
-    
-    if (!token) {
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
         success: false,
-        message: 'Não autenticado. Token em falta.'
+        message: 'Token não fornecido.'
       });
     }
     
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production');
+    const token = authHeader.split(' ')[1];
+    
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
     const user = await User.findById(decoded.id).select('-password');
     
@@ -472,20 +537,33 @@ const authenticate = async (req, res, next) => {
       });
     }
     
-    if (!user.isVerified) {
+    if (user.isLocked()) {
       return res.status(403).json({
         success: false,
-        message: 'Email não verificado. Verifique o seu email.'
+        message: 'Conta temporariamente bloqueada.'
       });
     }
     
     req.user = user;
     next();
   } catch (error) {
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token inválido.'
+      });
+    }
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({
+        success: false,
+        message: 'Token expirado.'
+      });
+    }
+    
     logger.error({ msg: 'Authentication error', error });
-    return res.status(401).json({
+    res.status(500).json({
       success: false,
-      message: 'Token inválido ou expirado.'
+      message: 'Erro na autenticação.'
     });
   }
 };
@@ -495,29 +573,28 @@ const authorize = (...roles) => {
     if (!roles.includes(req.user.role)) {
       return res.status(403).json({
         success: false,
-        message: 'Não tem permissão para aceder a este recurso.'
+        message: 'Sem permissões para esta ação.'
       });
     }
     next();
   };
 };
 
-// ✅ Middleware de auditoria corrigido
 const auditLog = (action, resource) => {
   return async (req, res, next) => {
     try {
       await AuditLog.create({
-        user: req.user ? req.user._id : null,
         action,
         resource,
-        resourceId: req.params.id || null,
+        resourceId: req.params.id,
+        user: req.user._id,
         ipAddress: req.ip,
-        userAgent: req.get('user-agent'),
+        userAgent: req.headers['user-agent'],
         details: {
-          body: req.body,
-          params: req.params
-        },
-        timestamp: new Date()
+          method: req.method,
+          url: req.url,
+          body: req.body
+        }
       });
     } catch (error) {
       logger.error({ msg: 'Audit log error', error });
@@ -527,246 +604,69 @@ const auditLog = (action, resource) => {
 };
 
 // ============================================
-// 6. VALIDAÇÃO DE INPUTS
-// ============================================
-
-const validateRegistration = [
-  body('name')
-    .trim()
-    .notEmpty().withMessage('Nome é obrigatório')
-    .isLength({ min: 2, max: 100 }).withMessage('Nome deve ter entre 2 e 100 caracteres')
-    .matches(/^[a-zA-ZÀ-ÿ\s]+$/).withMessage('Nome deve conter apenas letras'),
-  body('email')
-    .trim()
-    .normalizeEmail()
-    .isEmail().withMessage('Email inválido')
-    .isLength({ max: 100 }).withMessage('Email muito longo'),
-  body('phone')
-    .optional()
-    .trim()
-    .matches(/^\+?[0-9\s-()]+$/).withMessage('Telefone inválido'),
-  body('password')
-    .isLength({ min: 8 }).withMessage('Password deve ter no mínimo 8 caracteres')
-    .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/)
-    .withMessage('Password deve conter maiúsculas, minúsculas, números e símbolos'),
-  body('consentGiven')
-    .isBoolean()
-    .equals('true').withMessage('Deve aceitar os termos e condições')
-];
-
-const validateLogin = [
-  body('email')
-    .trim()
-    .normalizeEmail()
-    .isEmail().withMessage('Email inválido'),
-  body('password')
-    .notEmpty().withMessage('Password é obrigatória')
-];
-
-const validateIncident = [
-  body('title')
-    .trim()
-    .notEmpty().withMessage('Título é obrigatório')
-    .isLength({ min: 5, max: 200 }).withMessage('Título deve ter entre 5 e 200 caracteres'),
-  body('description')
-    .trim()
-    .notEmpty().withMessage('Descrição é obrigatória')
-    .isLength({ min: 10, max: 2000 }).withMessage('Descrição deve ter entre 10 e 2000 caracteres'),
-  body('location')
-    .trim()
-    .notEmpty().withMessage('Localização é obrigatória')
-    .isLength({ max: 300 }).withMessage('Localização muito longa'),
-  body('gps')
-    .optional()
-    .trim()
-    .matches(/^[-+]?([1-8]?\d(\.\d+)?|90(\.0+)?),\s*[-+]?(180(\.0+)?|((1[0-7]\d)|([1-9]?\d))(\.\d+)?)$/)
-    .withMessage('Coordenadas GPS inválidas')
-];
-
-// ============================================
-// HEALTH CHECK ENDPOINTS
-// ============================================
-
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    success: true, 
-    message: 'API is running',
-    timestamp: new Date().toISOString()
-  });
-});
-
-app.get('/', (req, res) => {
-  res.status(200).json({ 
-    success: true, 
-    message: 'Portal Freguesia API - Running',
-    endpoints: {
-      health: '/health',
-      api: '/api',
-      docs: 'https://github.com/mnunes1979/freguesia-portal-backend'
-    }
-  });
-});
-
-// ============================================
 // 7. ROTAS DE AUTENTICAÇÃO
 // ============================================
 
-app.post('/api/auth/register', validateRegistration, async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
-      });
-    }
-    
-    const { name, email, phone, password, consentGiven } = req.body;
-    
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'Email já registado.'
-      });
-    }
-    
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    const verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000;
-    
-    const user = await User.create({
-      name,
-      email,
-      phone,
-      password,
-      consentGiven,
-      verificationToken,
-      verificationTokenExpires
-    });
-    
-    logger.info({ msg: 'New user registered', email });
-    
-    await AuditLog.create({
-      user: user._id,
-      action: 'register',
-      resource: 'User',
-      resourceId: user._id,
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
-    });
-    
-    res.status(201).json({
-      success: true,
-      message: 'Conta criada com sucesso! Verifique o seu email para ativar a conta.',
-      data: {
-        userId: user._id,
-        email: user.email
-      }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Registration error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao criar conta. Tente novamente.'
-    });
-  }
-});
-
-app.post('/api/auth/login', validateLogin, async (req, res) => {
-  console.log('🔐 LOGIN ROUTE HIT!', {
-    method: req.method,
-    url: req.url,
-    origin: req.headers.origin,
-    body: { email: req.body?.email, hasPassword: !!req.body?.password }
-  });
-  
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      console.log('❌ Validation errors:', errors.array());
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
-      });
-    }
-    
-    const { email, password } = req.body;
-    console.log(`🔍 Attempting login for: ${email}`);
-    
-    const user = await User.findOne({ email }).select('+password');
-    
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas.'
-      });
-    }
-    
-    if (user.isLocked()) {
-      return res.status(423).json({
-        success: false,
-        message: 'Conta temporariamente bloqueada devido a múltiplas tentativas falhadas.'
-      });
-    }
-    
-    const isMatch = await user.comparePassword(password);
-    
-    if (!isMatch) {
-      user.loginAttempts += 1;
-      
-      if (user.loginAttempts >= 5) {
-        user.lockUntil = Date.now() + 30 * 60 * 1000;
-        logger.warn({ msg: 'Account locked due to failed attempts', email });
+app.post('/api/auth/register', 
+  [
+    body('name').trim().isLength({ min: 2, max: 100 }).escape(),
+    body('email').isEmail().normalizeEmail(),
+    body('password').isLength({ min: 8 }),
+    body('phone').optional().trim(),
+    body('consentGiven').isBoolean().equals('true')
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Dados inválidos.',
+          errors: errors.array()
+        });
       }
       
-      await user.save();
+      const { name, email, phone, password, consentGiven } = req.body;
       
-      return res.status(401).json({
-        success: false,
-        message: 'Credenciais inválidas.'
+      const existingUser = await User.findOne({ email });
+      if (existingUser) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email já registado.'
+        });
+      }
+      
+      const verificationToken = crypto.randomBytes(32).toString('hex');
+      const verificationTokenExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 horas
+      
+      const user = await User.create({
+        name,
+        email,
+        phone,
+        password,
+        consentGiven,
+        verificationToken,
+        verificationTokenExpires
       });
-    }
-    
-    user.loginAttempts = 0;
-    user.lockUntil = undefined;
-    user.lastLogin = Date.now();
-    await user.save();
-    
-    const token = generateToken(user._id);
-    
-    logger.info({ msg: 'User logged in', email });
-    
-    await AuditLog.create({
-      user: user._id,
-      action: 'login',
-      resource: 'User',
-      resourceId: user._id,
-      ipAddress: req.ip,
-      userAgent: req.get('user-agent')
-    });
-    
-    res.json({
-      success: true,
-      message: 'Login efetuado com sucesso!',
-      data: {
-        token,
-        user: {
-          id: user._id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          isVerified: user.isVerified
+      
+      logger.info({ msg: 'User registered', email });
+      
+      res.status(201).json({
+        success: true,
+        message: 'Registo efetuado com sucesso! Verifica o teu email.',
+        data: {
+          userId: user._id
         }
-      }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Login error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao efetuar login. Tente novamente.'
-    });
+      });
+    } catch (error) {
+      logger.error({ msg: 'Register error', error });
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao efetuar registo.'
+      });
+    }
   }
-});
+);
 
 app.get('/api/auth/verify/:token', async (req, res) => {
   try {
@@ -787,14 +687,14 @@ app.get('/api/auth/verify/:token', async (req, res) => {
     user.verificationTokenExpires = undefined;
     await user.save();
     
-    logger.info({ msg: 'Email verified', email: user.email });
+    logger.info({ msg: 'User verified', email: user.email });
     
     res.json({
       success: true,
-      message: 'Email verificado com sucesso! Pode agora fazer login.'
+      message: 'Email verificado com sucesso!'
     });
   } catch (error) {
-    logger.error({ msg: 'Email verification error', error });
+    logger.error({ msg: 'Verify error', error });
     res.status(500).json({
       success: false,
       message: 'Erro ao verificar email.'
@@ -802,80 +702,132 @@ app.get('/api/auth/verify/:token', async (req, res) => {
   }
 });
 
-app.get('/api/auth/me', authenticate, async (req, res) => {
-  res.json({
-    success: true,
-    data: {
-      user: req.user
+app.post('/api/auth/login',
+  [
+    body('email').isEmail().normalizeEmail(),
+    body('password').notEmpty()
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Dados inválidos.'
+        });
+      }
+      
+      const { email, password } = req.body;
+      
+      const user = await User.findOne({ email }).select('+password');
+      
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Credenciais inválidas.'
+        });
+      }
+      
+      if (user.isLocked()) {
+        return res.status(403).json({
+          success: false,
+          message: 'Conta temporariamente bloqueada. Tenta novamente mais tarde.'
+        });
+      }
+      
+      const isPasswordCorrect = await user.comparePassword(password);
+      
+      if (!isPasswordCorrect) {
+        user.loginAttempts += 1;
+        
+        if (user.loginAttempts >= 5) {
+          user.lockUntil = Date.now() + 15 * 60 * 1000; // 15 minutos
+          logger.warn({ msg: 'Account locked due to failed login attempts', email });
+        }
+        
+        await user.save();
+        
+        return res.status(401).json({
+          success: false,
+          message: 'Credenciais inválidas.'
+        });
+      }
+      
+      user.loginAttempts = 0;
+      user.lockUntil = undefined;
+      user.lastLogin = Date.now();
+      await user.save();
+      
+      const token = jwt.sign(
+        { id: user._id, role: user.role },
+        process.env.JWT_SECRET,
+        { expiresIn: '7d' }
+      );
+      
+      logger.info({ msg: 'User logged in', email });
+      
+      res.json({
+        success: true,
+        message: 'Login efetuado com sucesso!',
+        data: {
+          token,
+          user: {
+            id: user._id,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            isVerified: user.isVerified
+          }
+        }
+      });
+    } catch (error) {
+      logger.error({ msg: 'Login error', error });
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao efetuar login.'
+      });
     }
-  });
+  }
+);
+
+app.get('/api/auth/me', authenticate, async (req, res) => {
+  try {
+    res.json({
+      success: true,
+      data: {
+        user: req.user
+      }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Get user error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar utilizador.'
+    });
+  }
 });
 
 // ============================================
 // 8. ROTAS DE INCIDÊNCIAS
 // ============================================
 
-app.post('/api/incidents', authenticate, incidentLimiter, validateIncident, auditLog('incident_create', 'Incident'), async (req, res) => {
-  try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        errors: errors.array()
-      });
-    }
-    
-    const { title, description, location, gps, photos } = req.body;
-    
-    const incident = await Incident.create({
-      title,
-      description,
-      location,
-      gps,
-      photos: photos || [],
-      user: req.user._id,
-      status: 'pending'
-    });
-    
-    logger.info({ msg: 'Incident created', user: req.user.email, incidentId: incident._id });
-    
-    res.status(201).json({
-      success: true,
-      message: 'Incidência reportada com sucesso!',
-      data: { incident }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Create incident error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao reportar incidência.'
-    });
-  }
-});
-
 app.get('/api/incidents/public', async (req, res) => {
   try {
     const { status } = req.query;
     
-    const query = {};
-    if (status && ['pending', 'analyzing', 'inProgress', 'resolved'].includes(status)) {
-      query.status = status;
-    } else if (!status) {
-      query.status = { $in: ['pending', 'analyzing', 'inProgress', 'resolved'] };
-    }
+    const query = status ? { status } : {};
     
     const incidents = await Incident.find(query)
-      .select('-user -moderatorNotes -__v')
+      .populate('user', 'name email')
       .sort('-createdAt')
-      .limit(100);
+      .limit(50);
     
     res.json({
       success: true,
-      count: incidents.length,
       data: { incidents }
     });
   } catch (error) {
-    logger.error({ msg: 'List incidents error', error });
+    logger.error({ msg: 'Get incidents error', error });
     res.status(500).json({
       success: false,
       message: 'Erro ao carregar incidências.'
@@ -890,11 +842,10 @@ app.get('/api/incidents/my', authenticate, async (req, res) => {
     
     res.json({
       success: true,
-      count: incidents.length,
       data: { incidents }
     });
   } catch (error) {
-    logger.error({ msg: 'List my incidents error', error });
+    logger.error({ msg: 'Get my incidents error', error });
     res.status(500).json({
       success: false,
       message: 'Erro ao carregar incidências.'
@@ -905,7 +856,9 @@ app.get('/api/incidents/my', authenticate, async (req, res) => {
 app.get('/api/incidents/:id', async (req, res) => {
   try {
     const incident = await Incident.findById(req.params.id)
-      .select('-user -moderatorNotes -__v');
+      .populate('user', 'name email phone')
+      .populate('assignedTo', 'name email')
+      .populate('notes.addedBy', 'name');
     
     if (!incident) {
       return res.status(404).json({
@@ -927,18 +880,59 @@ app.get('/api/incidents/:id', async (req, res) => {
   }
 });
 
+app.post('/api/incidents', authenticate, incidentLimiter,
+  [
+    body('title').trim().isLength({ min: 5, max: 200 }).escape(),
+    body('description').trim().isLength({ min: 10, max: 2000 }).escape(),
+    body('location').trim().isLength({ min: 5, max: 300 }).escape(),
+    body('gps').optional().trim(),
+    body('category').isIn(['infrastructure', 'safety', 'environment', 'health', 'other'])
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Dados inválidos.',
+          errors: errors.array()
+        });
+      }
+      
+      const incident = await Incident.create({
+        ...req.body,
+        user: req.user._id
+      });
+      
+      logger.info({ msg: 'Incident created', user: req.user.email, incident: incident._id });
+      
+      res.status(201).json({
+        success: true,
+        message: 'Incidência criada com sucesso!',
+        data: { incident }
+      });
+    } catch (error) {
+      logger.error({ msg: 'Create incident error', error });
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao criar incidência.'
+      });
+    }
+  }
+);
+
 app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'admin'), auditLog('incident_update', 'Incident'), async (req, res) => {
   try {
-    const { status, moderatorNotes } = req.body;
+    const { status, note } = req.body;
     
     if (!['pending', 'analyzing', 'inProgress', 'resolved', 'rejected'].includes(status)) {
       return res.status(400).json({
         success: false,
-        message: 'Estado inválido.'
+        message: 'Status inválido.'
       });
     }
     
-    const incident = await Incident.findById(req.params.id).populate('user', 'email name');
+    const incident = await Incident.findById(req.params.id);
     
     if (!incident) {
       return res.status(404).json({
@@ -948,71 +942,57 @@ app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'adm
     }
     
     incident.status = status;
-    if (moderatorNotes) incident.moderatorNotes = moderatorNotes;
-    if (status === 'resolved') incident.resolvedDate = Date.now();
     
-    await incident.save();
+    if (status === 'resolved') {
+      incident.resolvedAt = Date.now();
+    }
     
-    logger.info({ msg: 'Incident status updated', incidentId: incident._id, status, by: req.user.email });
-    
-    res.json({
-      success: true,
-      message: 'Estado atualizado com sucesso!',
-      data: { incident }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Update incident error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao atualizar incidência.'
-    });
-  }
-});
-
-app.delete('/api/incidents/:id', authenticate, authorize('admin'), auditLog('incident_delete', 'Incident'), async (req, res) => {
-  try {
-    const incident = await Incident.findByIdAndDelete(req.params.id);
-    
-    if (!incident) {
-      return res.status(404).json({
-        success: false,
-        message: 'Incidência não encontrada.'
+    if (note) {
+      incident.notes.push({
+        text: note,
+        addedBy: req.user._id
       });
     }
     
-    logger.info({ msg: 'Incident deleted', incidentId: incident._id, by: req.user.email });
+    await incident.save();
+    
+    logger.info({ msg: 'Incident status updated', incident: incident._id, status, by: req.user.email });
     
     res.json({
       success: true,
-      message: 'Incidência eliminada com sucesso!'
+      message: 'Status atualizado com sucesso!',
+      data: { incident }
     });
   } catch (error) {
-    logger.error({ msg: 'Delete incident error', error });
+    logger.error({ msg: 'Update incident status error', error });
     res.status(500).json({
       success: false,
-      message: 'Erro ao eliminar incidência.'
+      message: 'Erro ao atualizar status.'
     });
   }
 });
 
 // ============================================
-// 9. ROTAS DE NOTÍCIAS (corrigidas e completas)
+// 9. ROTAS DE NOTÍCIAS
 // ============================================
 
 app.get('/api/news', async (req, res) => {
   try {
-    const news = await News.find({ published: true })
-      .select('-author -__v')
-      .sort('-publishDate')
-      .limit(20);
+    const { published } = req.query;
+    
+    const query = published === 'true' ? { published: true } : {};
+    
+    const news = await News.find(query)
+      .populate('author', 'name')
+      .sort('-createdAt')
+      .limit(50);
     
     res.json({
       success: true,
-      count: news.length,
       data: { news }
     });
   } catch (error) {
-    logger.error({ msg: 'List news error', error });
+    logger.error({ msg: 'Get news error', error });
     res.status(500).json({
       success: false,
       message: 'Erro ao carregar notícias.'
@@ -1020,41 +1000,10 @@ app.get('/api/news', async (req, res) => {
   }
 });
 
-app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('news_create', 'News'), async (req, res) => {
+app.get('/api/news/:id', async (req, res) => {
   try {
-    const { title, excerpt, content, image, published } = req.body;
-    
-    const news = await News.create({
-      title,
-      excerpt,
-      content,
-      image,
-      author: req.user._id,
-      published: published || false,
-      publishDate: published ? Date.now() : null
-    });
-    
-    logger.info({ msg: 'News created', by: req.user.email, newsId: news._id });
-    
-    res.status(201).json({
-      success: true,
-      message: 'Notícia criada com sucesso!',
-      data: { news }
-    });
-  } catch (error) {
-    logger.error({ msg: 'Create news error', error });
-    res.status(500).json({
-      success: false,
-      message: 'Erro ao criar notícia.'
-    });
-  }
-});
-
-app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog('news_update', 'News'), async (req, res) => {
-  try {
-    const { title, excerpt, content, image, published } = req.body;
-    
-    const news = await News.findById(req.params.id);
+    const news = await News.findById(req.params.id)
+      .populate('author', 'name email');
     
     if (!news) {
       return res.status(404).json({
@@ -1063,21 +1012,78 @@ app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog
       });
     }
     
-    news.title = title || news.title;
-    news.excerpt = excerpt || news.excerpt;
-    news.content = content || news.content;
-    news.image = image || news.image;
-    
-    if (published !== undefined) {
-      news.published = published;
-      if (published && !news.publishDate) {
-        news.publishDate = Date.now();
-      }
-    }
-    
+    news.views += 1;
     await news.save();
     
-    logger.info({ msg: 'News updated', newsId: news._id, by: req.user.email });
+    res.json({
+      success: true,
+      data: { news }
+    });
+  } catch (error) {
+    logger.error({ msg: 'Get news by id error', error });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao carregar notícia.'
+    });
+  }
+});
+
+app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('news_create', 'News'),
+  [
+    body('title').trim().isLength({ min: 5, max: 200 }).escape(),
+    body('content').trim().isLength({ min: 10 }),
+    body('excerpt').optional().trim().isLength({ max: 300 }).escape(),
+    body('category').isIn(['event', 'announcement', 'notice', 'general'])
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Dados inválidos.',
+          errors: errors.array()
+        });
+      }
+      
+      const news = await News.create({
+        ...req.body,
+        author: req.user._id
+      });
+      
+      logger.info({ msg: 'News created', author: req.user.email, news: news._id });
+      
+      res.status(201).json({
+        success: true,
+        message: 'Notícia criada com sucesso!',
+        data: { news }
+      });
+    } catch (error) {
+      logger.error({ msg: 'Create news error', error });
+      res.status(500).json({
+        success: false,
+        message: 'Erro ao criar notícia.'
+      });
+    }
+  }
+);
+
+app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog('news_update', 'News'), async (req, res) => {
+  try {
+    const news = await News.findByIdAndUpdate(
+      req.params.id,
+      req.body,
+      { new: true, runValidators: true }
+    );
+    
+    if (!news) {
+      return res.status(404).json({
+        success: false,
+        message: 'Notícia não encontrada.'
+      });
+    }
+    
+    logger.info({ msg: 'News updated', news: news._id, by: req.user.email });
     
     res.json({
       success: true,
@@ -1093,7 +1099,7 @@ app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog
   }
 });
 
-app.delete('/api/news/:id', authenticate, authorize('admin'), auditLog('news_delete', 'News'), async (req, res) => {
+app.delete('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog('news_delete', 'News'), async (req, res) => {
   try {
     const news = await News.findByIdAndDelete(req.params.id);
     
@@ -1104,7 +1110,7 @@ app.delete('/api/news/:id', authenticate, authorize('admin'), auditLog('news_del
       });
     }
     
-    logger.info({ msg: 'News deleted', newsId: news._id, by: req.user.email });
+    logger.info({ msg: 'News deleted', news: news._id, by: req.user.email });
     
     res.json({
       success: true,
@@ -1126,16 +1132,14 @@ app.delete('/api/news/:id', authenticate, authorize('admin'), auditLog('news_del
 app.get('/api/slides', async (req, res) => {
   try {
     const slides = await Slide.find({ active: true })
-      .sort('order')
-      .select('-__v');
+      .sort('order');
     
     res.json({
       success: true,
-      count: slides.length,
       data: { slides }
     });
   } catch (error) {
-    logger.error({ msg: 'List slides error', error });
+    logger.error({ msg: 'Get slides error', error });
     res.status(500).json({
       success: false,
       message: 'Erro ao carregar slides.'
@@ -1143,18 +1147,11 @@ app.get('/api/slides', async (req, res) => {
   }
 });
 
-app.post('/api/slides', authenticate, authorize('admin'), async (req, res) => {
+app.post('/api/slides', authenticate, authorize('admin'), auditLog('slide_create', 'Slide'), async (req, res) => {
   try {
-    const { title, image, order, active } = req.body;
+    const slide = await Slide.create(req.body);
     
-    const slide = await Slide.create({
-      title,
-      image,
-      order: order || 0,
-      active: active !== undefined ? active : true
-    });
-    
-    logger.info({ msg: 'Slide created', by: req.user.email, slideId: slide._id });
+    logger.info({ msg: 'Slide created', by: req.user.email });
     
     res.status(201).json({
       success: true,
@@ -1170,13 +1167,11 @@ app.post('/api/slides', authenticate, authorize('admin'), async (req, res) => {
   }
 });
 
-app.put('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
+app.put('/api/slides/:id', authenticate, authorize('admin'), auditLog('slide_update', 'Slide'), async (req, res) => {
   try {
-    const { title, image, order, active } = req.body;
-    
     const slide = await Slide.findByIdAndUpdate(
       req.params.id,
-      { title, image, order, active },
+      req.body,
       { new: true, runValidators: true }
     );
     
@@ -1187,7 +1182,7 @@ app.put('/api/slides/:id', authenticate, authorize('admin'), async (req, res) =>
       });
     }
     
-    logger.info({ msg: 'Slide updated', slideId: slide._id, by: req.user.email });
+    logger.info({ msg: 'Slide updated', by: req.user.email });
     
     res.json({
       success: true,
@@ -1203,7 +1198,7 @@ app.put('/api/slides/:id', authenticate, authorize('admin'), async (req, res) =>
   }
 });
 
-app.delete('/api/slides/:id', authenticate, authorize('admin'), async (req, res) => {
+app.delete('/api/slides/:id', authenticate, authorize('admin'), auditLog('slide_delete', 'Slide'), async (req, res) => {
   try {
     const slide = await Slide.findByIdAndDelete(req.params.id);
     
@@ -1214,7 +1209,7 @@ app.delete('/api/slides/:id', authenticate, authorize('admin'), async (req, res)
       });
     }
     
-    logger.info({ msg: 'Slide deleted', slideId: slide._id, by: req.user.email });
+    logger.info({ msg: 'Slide deleted', by: req.user.email });
     
     res.json({
       success: true,
@@ -1236,16 +1231,14 @@ app.delete('/api/slides/:id', authenticate, authorize('admin'), async (req, res)
 app.get('/api/links', async (req, res) => {
   try {
     const links = await Link.find({ active: true })
-      .sort('order')
-      .select('-__v');
+      .sort('order');
     
     res.json({
       success: true,
-      count: links.length,
       data: { links }
     });
   } catch (error) {
-    logger.error({ msg: 'List links error', error });
+    logger.error({ msg: 'Get links error', error });
     res.status(500).json({
       success: false,
       message: 'Erro ao carregar links.'
@@ -1253,18 +1246,11 @@ app.get('/api/links', async (req, res) => {
   }
 });
 
-app.post('/api/links', authenticate, authorize('admin'), async (req, res) => {
+app.post('/api/links', authenticate, authorize('admin'), auditLog('link_create', 'Link'), async (req, res) => {
   try {
-    const { title, url, order, active } = req.body;
+    const link = await Link.create(req.body);
     
-    const link = await Link.create({
-      title,
-      url,
-      order: order || 0,
-      active: active !== undefined ? active : true
-    });
-    
-    logger.info({ msg: 'Link created', by: req.user.email, linkId: link._id });
+    logger.info({ msg: 'Link created', by: req.user.email });
     
     res.status(201).json({
       success: true,
@@ -1280,13 +1266,11 @@ app.post('/api/links', authenticate, authorize('admin'), async (req, res) => {
   }
 });
 
-app.put('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
+app.put('/api/links/:id', authenticate, authorize('admin'), auditLog('link_update', 'Link'), async (req, res) => {
   try {
-    const { title, url, order, active } = req.body;
-    
     const link = await Link.findByIdAndUpdate(
       req.params.id,
-      { title, url, order, active },
+      req.body,
       { new: true, runValidators: true }
     );
     
@@ -1297,7 +1281,7 @@ app.put('/api/links/:id', authenticate, authorize('admin'), async (req, res) => 
       });
     }
     
-    logger.info({ msg: 'Link updated', linkId: link._id, by: req.user.email });
+    logger.info({ msg: 'Link updated', by: req.user.email });
     
     res.json({
       success: true,
@@ -1313,7 +1297,7 @@ app.put('/api/links/:id', authenticate, authorize('admin'), async (req, res) => 
   }
 });
 
-app.delete('/api/links/:id', authenticate, authorize('admin'), async (req, res) => {
+app.delete('/api/links/:id', authenticate, authorize('admin'), auditLog('link_delete', 'Link'), async (req, res) => {
   try {
     const link = await Link.findByIdAndDelete(req.params.id);
     
@@ -1324,7 +1308,7 @@ app.delete('/api/links/:id', authenticate, authorize('admin'), async (req, res) 
       });
     }
     
-    logger.info({ msg: 'Link deleted', linkId: link._id, by: req.user.email });
+    logger.info({ msg: 'Link deleted', by: req.user.email });
     
     res.json({
       success: true,
@@ -1345,17 +1329,14 @@ app.delete('/api/links/:id', authenticate, authorize('admin'), async (req, res) 
 
 app.get('/api/admin/users', authenticate, authorize('admin'), async (req, res) => {
   try {
-    const users = await User.find()
-      .select('-password -verificationToken -passwordResetToken')
-      .sort('-createdAt');
+    const users = await User.find().select('-password').sort('-createdAt');
     
     res.json({
       success: true,
-      count: users.length,
       data: { users }
     });
   } catch (error) {
-    logger.error({ msg: 'List users error', error });
+    logger.error({ msg: 'Get users error', error });
     res.status(500).json({
       success: false,
       message: 'Erro ao carregar utilizadores.'
@@ -1547,7 +1528,7 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================
-// 14. LIGAÇÃO À BASE DE DADOS E SERVIDOR (FINAL, SEM HOTFIX)
+// 14. LIGAÇÃO À BASE DE DADOS E SERVIDOR
 // ============================================
 
 function clean(value) {
@@ -1555,14 +1536,12 @@ function clean(value) {
   return String(value).replace(/^['"]|['"]$/g, '').trim().replace(/\s+$/,'').replace(/\$$/, '');
 }
 
-// 1) validação dura da env
 const RAW_MONGO_URI = clean(process.env.MONGODB_URI);
 if (!RAW_MONGO_URI) {
   console.error('❌ ERRO: Variável MONGODB_URI não definida no ambiente!');
   process.exit(1);
 }
 
-// 2) log mascarado (sem password)
 const MASKED_URI = RAW_MONGO_URI.replace(/\/\/([^:]+):([^@]+)@/, '//<user>:<pass>@');
 console.log('ENV CHECK → NODE_ENV=', process.env.NODE_ENV || '(unset)');
 console.log('ENV CHECK → MONGODB_URI (masked)=', MASKED_URI);
@@ -1583,7 +1562,6 @@ mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
       console.log(`📚 API disponível em: http://localhost:${PORT}/api`);
       console.log('✅ Server is listening and ready to accept requests');
       
-      // Verificação extra: o servidor está realmente funcional?
       setTimeout(() => {
         console.log('✅ Server has been running for 2 seconds without crashes!');
       }, 2000);
@@ -1599,32 +1577,14 @@ mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 10000 })
 process.on('unhandledRejection', (err) => {
   console.error('❌ UNHANDLED REJECTION DETECTED!');
   console.error('Error:', err);
-  console.error('Error name:', err?.name);
-  console.error('Error message:', err?.message);
-  console.error('Error stack:', err?.stack);
-  logger.error({ 
-    msg: 'UNHANDLED REJECTION! Shutting down...', 
-    error: err,
-    errorName: err?.name,
-    errorMessage: err?.message,
-    errorStack: err?.stack
-  });
+  logger.error({ msg: 'UNHANDLED REJECTION! Shutting down...', error: err });
   process.exit(1);
 });
 
 process.on('uncaughtException', (err) => {
   console.error('❌ UNCAUGHT EXCEPTION DETECTED!');
   console.error('Error:', err);
-  console.error('Error name:', err?.name);
-  console.error('Error message:', err?.message);
-  console.error('Error stack:', err?.stack);
-  logger.error({ 
-    msg: 'UNCAUGHT EXCEPTION! Shutting down...', 
-    error: err,
-    errorName: err?.name,
-    errorMessage: err?.message,
-    errorStack: err?.stack
-  });
+  logger.error({ msg: 'UNCAUGHT EXCEPTION! Shutting down...', error: err });
   process.exit(1);
 });
 
