@@ -929,6 +929,42 @@ app.get('/api/incidents/:id', async (req, res) => {
   }
 });
 
+// GET /api/incidents - Listar TODAS as incidências (Admin/Moderator only)
+app.get('/api/incidents', authenticate, authorize('moderator', 'admin'), async (req, res) => {
+  try {
+    // Query opcional para filtrar por status
+    const { status } = req.query;
+    
+    let query = {};
+    if (status) {
+      query.status = status;
+    }
+    
+    const incidents = await Incident.find(query)
+      .populate('reporter', 'name email')
+      .sort('-createdAt')
+      .select('-__v');
+    
+    logger.info({ 
+      msg: 'List all incidents', 
+      by: req.user.email,
+      count: incidents.length 
+    });
+    
+    res.json({
+      success: true,
+      count: incidents.length,
+      data: { incidents }
+    });
+  } catch (error) {
+    logger.error({ msg: 'List all incidents error', error: error.message });
+    res.status(500).json({
+      success: false,
+      message: 'Erro ao listar incidências'
+    });
+  }
+});
+
 app.patch('/api/incidents/:id/status', authenticate, authorize('moderator', 'admin'), auditLog('incident_update', 'Incident'), async (req, res) => {
   try {
     const { status, moderatorNotes } = req.body;
