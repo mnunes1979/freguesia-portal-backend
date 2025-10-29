@@ -1630,16 +1630,16 @@ process.on('uncaughtException', (err) => {
   process.exit(1);
 });
 
-process.on('SIGTERM', async () => {
-  logger.info({ msg: 'SIGTERM received. Shutting down gracefully...' });
-  try {
-    await mongoose.connection.close();
-    logger.info({ msg: 'MongoDB connection closed.' });
-    process.exit(0);
-  } catch (err) {
-    logger.error({ msg: 'Error closing MongoDB connection', error: err });
-    process.exit(1);
-  }
-});
+//process.on('SIGTERM', async () => {
+  //logger.info({ msg: 'SIGTERM received. Shutting down gracefully...' });
+  //try {
+    //await mongoose.connection.close();
+    //logger.info({ msg: 'MongoDB connection closed.' });
+    //process.exit(0);
+  //} catch (err) {
+    //logger.error({ msg: 'Error closing MongoDB connection', error: err });
+    //process.exit(1);
+  //}
+//});
 
 module.exports = app;
