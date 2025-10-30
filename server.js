@@ -342,12 +342,7 @@ const newsSchema = new mongoose.Schema({
     trim: true,
     maxlength: [200, 'Título muito longo']
   },
-  excerpt: {
-    type: String,
-    required: [true, 'Resumo é obrigatório'],
-    trim: true,
-    maxlength: [500, 'Resumo muito longo']
-  },
+  excerpt: { type: String, trim: true, maxlength: [500, 'Resumo muito longo'] },
   content: {
     type: String,
     required: [true, 'Conteúdo é obrigatório'],
@@ -357,6 +352,7 @@ const newsSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Imagem é obrigatória']
   },
+  category: { type: String, enum: ['geral','cultura','desporto','avisos','outros'], default: 'geral' },
   author: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -372,6 +368,24 @@ const newsSchema = new mongoose.Schema({
 });
 
 const News = mongoose.model('News', newsSchema);
+
+// ============================================
+// Configurações do Site (para /api/config)
+// ============================================
+const configSchema = new mongoose.Schema({
+  siteName: { type: String, default: 'União de Freguesias' },
+  siteDescription: { type: String, default: 'Portal de transparência e gestão cidadã' },
+  contactEmail: { type: String, default: '' },
+  contactPhone: { type: String, default: '' },
+  address: { type: String, default: '' },
+  facebookUrl: { type: String, default: '' },
+  instagramUrl: { type: String, default: '' },
+  emailNotifications: { type: Boolean, default: true },
+  publicIncidences: { type: Boolean, default: true },
+  requireApproval: { type: Boolean, default: true },
+}, { timestamps: true });
+
+const SiteConfig = mongoose.model('SiteConfig', configSchema);
 
 const slideSchema = new mongoose.Schema({
   title: {
@@ -1060,13 +1074,14 @@ app.get('/api/news', async (req, res) => {
 
 app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('news_create', 'News'), async (req, res) => {
   try {
-    const { title, excerpt, content, image, published } = req.body;
+    const { title, excerpt, content, image, published, category } = req.body;
     
     const news = await News.create({
       title,
-      excerpt,
+      excerpt: excerpt || '',
       content,
       image,
+      category: category || 'geral',
       author: req.user._id,
       published: published || false,
       publishDate: published ? Date.now() : null
@@ -1090,7 +1105,7 @@ app.post('/api/news', authenticate, authorize('moderator', 'admin'), auditLog('n
 
 app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog('news_update', 'News'), async (req, res) => {
   try {
-    const { title, excerpt, content, image, published } = req.body;
+    const { title, excerpt, content, image, published, category } = req.body;
     
     const news = await News.findById(req.params.id);
     
@@ -1105,6 +1120,7 @@ app.put('/api/news/:id', authenticate, authorize('moderator', 'admin'), auditLog
     news.excerpt = excerpt || news.excerpt;
     news.content = content || news.content;
     news.image = image || news.image;
+    news.category = category || news.category;
     
     if (published !== undefined) {
       news.published = published;
@@ -1157,6 +1173,39 @@ app.delete('/api/news/:id', authenticate, authorize('admin'), auditLog('news_del
   }
 });
 
+
+// ============================================
+// 9.B ROTAS DE CONFIGURAÇÕES DO SITE
+// ============================================
+app.get('/api/config', async (req, res) => {
+  try {
+    let cfg = await SiteConfig.findOne();
+    if (!cfg) {
+      cfg = await SiteConfig.create({});
+    }
+    res.json({ success: true, data: cfg.toObject() });
+  } catch (error) {
+    logger.error({ msg: 'Get config error', error });
+    res.status(500).json({ success: false, message: 'Erro ao carregar configurações.' });
+  }
+});
+
+app.put('/api/config', authenticate, authorize('admin'), async (req, res) => {
+  try {
+    const update = { ...req.body };
+    let cfg = await SiteConfig.findOne();
+    if (!cfg) {
+      cfg = await SiteConfig.create(update);
+    } else {
+      Object.assign(cfg, update);
+      await cfg.save();
+    }
+    res.json({ success: true, message: 'Configurações guardadas com sucesso!', data: cfg.toObject() });
+  } catch (error) {
+    logger.error({ msg: 'Update config error', error });
+    res.status(500).json({ success: false, message: 'Erro ao guardar configurações.' });
+  }
+});
 // ============================================
 // 10. ROTAS DE SLIDES
 // ============================================
