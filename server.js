@@ -26,16 +26,15 @@ const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
 
 const app = express();
-// === Uploads static dir ===
+// === Uploads static dir & helpers ===
 const UPLOAD_DIR = path.join(__dirname, 'uploads');
 if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-if (!fs.existsSync(path.join(UPLOAD_DIR,'raw'))) fs.mkdirSync(path.join(UPLOAD_DIR,'raw'), { recursive: true });
+if (!fs.existsSync(path.join(UPLOAD_DIR, 'raw'))) fs.mkdirSync(path.join(UPLOAD_DIR, 'raw'), { recursive: true });
 
 app.use('/uploads', express.static(UPLOAD_DIR, {
   setHeaders: (res) => res.setHeader('Cache-Control','public, max-age=31536000, immutable')
 }));
 
-// === Multer storage/limits ===
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(UPLOAD_DIR, 'raw')),
   filename: (req, file, cb) => {
@@ -59,14 +58,13 @@ async function processImage(inputPath, outRel) {
   const outPath = path.join(outDir, `${base}.webp`);
   const pipeline = sharp(inputPath).rotate();
   const meta = await pipeline.metadata();
-  await pipeline
-    .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
-    .webp({ quality: 78 })
-    .toFile(outPath);
-  const { size } = fs.statSync(outPath);
+  await pipeline.resize({ width:1600, height:1600, fit:'inside', withoutEnlargement:true })
+              .webp({ quality:78 }).toFile(outPath);
   try { fs.unlinkSync(inputPath); } catch(e) {}
-  return { url: `/uploads/${outRel}/${path.basename(outPath)}`, width: meta.width, height: meta.height, format: 'webp', sizeKB: Math.round(size/1024) };
+  const { size } = fs.statSync(outPath);
+  return { url:`/uploads/${outRel}/${path.basename(outPath)}`, width: meta.width, height: meta.height, format:'webp', sizeKB: Math.round(size/1024) };
 }
+
 // Logo após criar o app, ANTES de qualquer middleware:
 
 
@@ -751,6 +749,8 @@ app.post('/api/auth/login', validateLogin, async (req, res) => {
     
     const user = await User.findOne({ email }).select('+password');
     
+      if (!user) return res.status(401).json({ success:false, message:'Credenciais inválidas' });
+      if (!user.isActive) return res.status(403).json({ success:false, message:'Conta desativada' });
     if (!user) {
       return res.status(401).json({
         success: false,
@@ -1734,7 +1734,8 @@ process.on('uncaughtException', (err) => {
 
 module.exports = app;
 
-// === Upload endpoint (generic) ===
+
+// === Upload genérico (admin/moderator) ===
 app.post('/api/uploads', authenticate, authorize(['admin','moderator']), upload.array('files'), async (req, res) => {
   try {
     const out = [];
@@ -1747,20 +1748,20 @@ app.post('/api/uploads', authenticate, authorize(['admin','moderator']), upload.
   }
 });
 
+
+// === Multipart handlers para News ===
 app.post('/api/news', authenticate, authorize(['admin','moderator']), upload.array('images'), async (req, res, next) => {
   try {
     if (req.is('multipart/form-data')) {
       const payload = req.body.data ? JSON.parse(req.body.data) : req.body;
       const images = [];
-      for (const f of (req.files || [])) {
-        images.push(await processImage(f.path, 'news'));
-      }
-      payload.images = images.length ? images : payload.images || [];
+      for (const f of (req.files || [])) images.push(await processImage(f.path, 'news'));
+      if (images.length) payload.images = images;
       const doc = await News.create(payload);
       return res.status(201).json({ success:true, data: doc });
     }
-    return next(); // not multipart -> other handler processes
-  } catch (e) { return res.status(400).json({ success:false, message: e.message }); }
+    return next && next();
+  } catch (e) { return res.status(400).json({ success:false, message:e.message }); }
 });
 
 app.put('/api/news/:id', authenticate, authorize(['admin','moderator']), upload.array('images'), async (req, res, next) => {
@@ -1768,13 +1769,41 @@ app.put('/api/news/:id', authenticate, authorize(['admin','moderator']), upload.
     if (req.is('multipart/form-data')) {
       const payload = req.body.data ? JSON.parse(req.body.data) : req.body;
       const images = [];
-      for (const f of (req.files || [])) {
-        images.push(await processImage(f.path, 'news'));
-      }
+      for (const f of (req.files || [])) images.push(await processImage(f.path, 'news'));
       if (images.length) payload.images = images;
       const doc = await News.findByIdAndUpdate(req.params.id, payload, { new:true });
       return res.json({ success:true, data: doc });
     }
-    return next();
-  } catch (e) { return res.status(400).json({ success:false, message: e.message }); }
+    return next && next();
+  } catch (e) { return res.status(400).json({ success:false, message:e.message }); }
+});
+
+
+// === Multipart handlers para Incidents ===
+app.post('/api/incidents', upload.array('images'), async (req, res, next) => {
+  try {
+    if (req.is('multipart/form-data')) {
+      const payload = req.body.data ? JSON.parse(req.body.data) : req.body;
+      const images = [];
+      for (const f of (req.files || [])) images.push(await processImage(f.path, 'incidents'));
+      if (images.length) payload.images = images;
+      const doc = await Incident.create(payload);
+      return res.status(201).json({ success:true, data: doc });
+    }
+    return next && next();
+  } catch (e) { return res.status(400).json({ success:false, message:e.message }); }
+});
+
+app.put('/api/incidents/:id', authenticate, authorize(['admin','moderator']), upload.array('images'), async (req, res, next) => {
+  try {
+    if (req.is('multipart/form-data')) {
+      const payload = req.body.data ? JSON.parse(req.body.data) : req.body;
+      const images = [];
+      for (const f of (req.files || [])) images.push(await processImage(f.path, 'incidents'));
+      if (images.length) payload.images = images;
+      const doc = await Incident.findByIdAndUpdate(req.params.id, payload, { new:true });
+      return res.json({ success:true, data: doc });
+    }
+    return next && next();
+  } catch (e) { return res.status(400).json({ success:false, message:e.message }); }
 });
