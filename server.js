@@ -13,6 +13,10 @@ const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 const xss = require('xss-clean');
 const hpp = require('hpp');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
+const sharp = require('sharp');
 const compression = require('compression');
 const morgan = require('morgan');
 const winston = require('winston');
@@ -22,6 +26,47 @@ const { body, validationResult } = require('express-validator');
 const crypto = require('crypto');
 
 const app = express();
+// === Uploads static dir ===
+const UPLOAD_DIR = path.join(__dirname, 'uploads');
+if (!fs.existsSync(UPLOAD_DIR)) fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+if (!fs.existsSync(path.join(UPLOAD_DIR,'raw'))) fs.mkdirSync(path.join(UPLOAD_DIR,'raw'), { recursive: true });
+
+app.use('/uploads', express.static(UPLOAD_DIR, {
+  setHeaders: (res) => res.setHeader('Cache-Control','public, max-age=31536000, immutable')
+}));
+
+// === Multer storage/limits ===
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, path.join(UPLOAD_DIR, 'raw')),
+  filename: (req, file, cb) => {
+    const safe = (file.originalname || 'file').toLowerCase().replace(/[^a-z0-9_.-]/g,'_');
+    cb(null, `${Date.now()}_${safe}`);
+  }
+});
+const upload = multer({
+  storage,
+  limits: { fileSize: 8 * 1024 * 1024, files: 8 },
+  fileFilter: (req, file, cb) => {
+    const ok = ['image/jpeg','image/png','image/webp'].includes(file.mimetype);
+    cb(ok ? null : new Error('Formato inválido (apenas jpg/png/webp).'), ok);
+  }
+});
+
+async function processImage(inputPath, outRel) {
+  const outDir = path.join(UPLOAD_DIR, outRel);
+  if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
+  const base = path.basename(inputPath, path.extname(inputPath));
+  const outPath = path.join(outDir, `${base}.webp`);
+  const pipeline = sharp(inputPath).rotate();
+  const meta = await pipeline.metadata();
+  await pipeline
+    .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 78 })
+    .toFile(outPath);
+  const { size } = fs.statSync(outPath);
+  try { fs.unlinkSync(inputPath); } catch(e) {}
+  return { url: `/uploads/${outRel}/${path.basename(outPath)}`, width: meta.width, height: meta.height, format: 'webp', sizeKB: Math.round(size/1024) };
+}
 // Logo após criar o app, ANTES de qualquer middleware:
 
 
@@ -236,6 +281,7 @@ const userSchema = new mongoose.Schema({
     enum: ['user', 'moderator', 'admin'],
     default: 'user'
   },
+  isActive: { type: Boolean, default: true },
   isVerified: {
     type: Boolean,
     default: false
@@ -280,6 +326,7 @@ userSchema.methods.isLocked = function() {
 const User = mongoose.model('User', userSchema);
 
 const incidentSchema = new mongoose.Schema({
+  images: { type: [imageSchema], default: [] },
   title: {
     type: String,
     required: [true, 'Título é obrigatório'],
@@ -335,6 +382,14 @@ incidentSchema.index({ user: 1 });
 
 const Incident = mongoose.model('Incident', incidentSchema);
 
+const imageSchema = new mongoose.Schema({
+  url: { type: String, required: true },
+  width: Number,
+  height: Number,
+  format: String,
+  sizeKB: Number
+}, { _id: false });
+
 const newsSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -353,10 +408,9 @@ const newsSchema = new mongoose.Schema({
     required: [true, 'Conteúdo é obrigatório'],
     maxlength: [10000, 'Conteúdo muito longo']
   },
-  image: {
-    type: String,
-    required: [true, 'Imagem é obrigatória']
-  },
+  image: { type: String, required: false },
+  images: { type: [imageSchema], default: [] },
+  
   author: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',
@@ -1679,3 +1733,48 @@ process.on('uncaughtException', (err) => {
 //});
 
 module.exports = app;
+
+// === Upload endpoint (generic) ===
+app.post('/api/uploads', authenticate, authorize(['admin','moderator']), upload.array('files'), async (req, res) => {
+  try {
+    const out = [];
+    for (const f of (req.files || [])) {
+      out.push(await processImage(f.path, 'images'));
+    }
+    res.json({ success: true, files: out });
+  } catch (e) {
+    res.status(400).json({ success:false, message: e.message });
+  }
+});
+
+app.post('/api/news', authenticate, authorize(['admin','moderator']), upload.array('images'), async (req, res, next) => {
+  try {
+    if (req.is('multipart/form-data')) {
+      const payload = req.body.data ? JSON.parse(req.body.data) : req.body;
+      const images = [];
+      for (const f of (req.files || [])) {
+        images.push(await processImage(f.path, 'news'));
+      }
+      payload.images = images.length ? images : payload.images || [];
+      const doc = await News.create(payload);
+      return res.status(201).json({ success:true, data: doc });
+    }
+    return next(); // not multipart -> other handler processes
+  } catch (e) { return res.status(400).json({ success:false, message: e.message }); }
+});
+
+app.put('/api/news/:id', authenticate, authorize(['admin','moderator']), upload.array('images'), async (req, res, next) => {
+  try {
+    if (req.is('multipart/form-data')) {
+      const payload = req.body.data ? JSON.parse(req.body.data) : req.body;
+      const images = [];
+      for (const f of (req.files || [])) {
+        images.push(await processImage(f.path, 'news'));
+      }
+      if (images.length) payload.images = images;
+      const doc = await News.findByIdAndUpdate(req.params.id, payload, { new:true });
+      return res.json({ success:true, data: doc });
+    }
+    return next();
+  } catch (e) { return res.status(400).json({ success:false, message: e.message }); }
+});
